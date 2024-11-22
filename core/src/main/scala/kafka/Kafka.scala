@@ -33,8 +33,8 @@ object Kafka extends Logging {
       .withRequiredArg()
       .ofType(classOf[String])
     // This is just to make the parameter show up in the help output, we are not actually using this due the
-    // fact that this class ignores the first parameter which is interpreted as positional and mandatory
-    // but would not be mandatory if --version is specified
+    // fact(事实) that this class ignores the first parameter which is interpreted as positional and mandatory  but would not be mandatory if --version is specified
+    // 此类忽略第一个参数，该参数被解释为位置性和强制性的，但如果指定了--version，则不是强制性的
     // This is a bit of an ugly crutch till we get a chance to rework the entire command line parsing
     optionParser.accepts("version", "Print version information and exit.")
 
@@ -87,6 +87,7 @@ object Kafka extends Logging {
   def main(args: Array[String]): Unit = {
     try {
       val serverProps = getPropsFromArgs(args)
+      //这里根据是否需要zookeeper，创建为KafkaServer或KafkaRaftServer
       val server = buildServer(serverProps)
 
       try {

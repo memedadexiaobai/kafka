@@ -48,9 +48,9 @@ import java.util.stream.Collectors;
 
 /**
  * A collection of meta.properties information for Kafka log directories.
- *
- * Directories are categorized into empty, error, and normal. Each directory must appear in only
- * one category, corresponding to emptyLogDirs, errorLogDirs, and logDirProps.
+ * 目录分为空、错误和正常。每个目录必须只出现在一个类别中，对应
+ * Directories are categorized into empty, error, and normal. Each directory must appear in only one category,
+ *  corresponding(对应) to emptyLogDirs, errorLogDirs, and logDirProps.
  *
  * This class is immutable. Modified copies can be made with the Copier class.
  */

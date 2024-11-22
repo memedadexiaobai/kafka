@@ -173,6 +173,7 @@ class KafkaServer(
 
   var quotaManagers: QuotaFactory.QuotaManagers = _
 
+  //创建配置
   val zkClientConfig: ZKClientConfig = KafkaServer.zkClientConfigFromKafkaConfig(config)
   private var _zkClient: KafkaZkClient = _
   private var configRepository: ZkConfigRepository = _
@@ -224,6 +225,7 @@ class KafkaServer(
       if (startupComplete.get)
         return
 
+      //标识在启动
       val canStartup = isStartingUp.compareAndSet(false, true)
       if (canStartup) {
         _brokerState = BrokerState.STARTING
@@ -264,8 +266,7 @@ class KafkaServer(
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
-        // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
-        // applied after ZkConfigManager starts.
+        // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be applied after ZkConfigManager starts.
         config.dynamicConfig.initialize(Some(zkClient), clientMetricsReceiverPluginOpt = None)
 
         /* start scheduler */

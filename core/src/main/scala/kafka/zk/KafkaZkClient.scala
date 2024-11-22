@@ -1715,6 +1715,7 @@ class KafkaZkClient private[zk] (
     * @return optional cluster id in String.
     */
   def getClusterId: Option[String] = {
+    // /cluster/id
     val getDataRequest = GetDataRequest(ClusterIdZNode.path)
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
     getDataResponse.resultCode match {
@@ -1785,6 +1786,7 @@ class KafkaZkClient private[zk] (
     */
   def createOrGetClusterId(proposedClusterId: String): String = {
     try {
+      // /cluster/id
       createRecursive(ClusterIdZNode.path, ClusterIdZNode.toJson(proposedClusterId))
       proposedClusterId
     } catch {
