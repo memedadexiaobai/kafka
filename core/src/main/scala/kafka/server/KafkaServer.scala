@@ -230,7 +230,7 @@ class KafkaServer(
       if (canStartup) {
         _brokerState = BrokerState.STARTING
 
-        /* setup zookeeper */
+        /* setup zookeeper and ensure znode exist, if none, create zonde info */
         initZkClient(time)
         configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
 
@@ -344,7 +344,7 @@ class KafkaServer(
           _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
         }
 
-        // Enable delegation token cache for all SCRAM mechanisms to simplify dynamic update.
+        // Enable delegation token cache for all SCRAM mechanisms(机制) to simplify dynamic update.
         // This keeps the cache up-to-date if new SCRAM mechanisms are enabled dynamically.
         tokenCache = new DelegationTokenCache(ScramMechanism.mechanismNames)
         credentialProvider = new CredentialProvider(ScramMechanism.mechanismNames, tokenCache)
@@ -750,7 +750,24 @@ class KafkaServer(
 
   private def initZkClient(time: Time): Unit = {
     info(s"Connecting to zookeeper on ${config.zkConnect}")
+    //创建KafkaZkClient并保证在配置zookeeper chroot的情况下，对应节点存在
     _zkClient = KafkaZkClient.createZkClient("Kafka server", time, config, zkClientConfig)
+    //创建对应的顶层路径 顶层目录是 /config
+    //ConsumerPathZNode.path：这是旧版本的消费者路径节点，用于存储消费者相关的信息。在Kafka的新版本中，消费者路径已经更新，但这个路径可能用于向后兼容。
+    //BrokerIdsZNode.path：这个路径用于存储Broker的ID信息。Broker是Kafka中的一个节点，负责处理数据的存储和转发。
+    //TopicsZNode.path：这个路径用于存储Kafka主题（Topic）的元数据信息。
+    //ConfigEntityChangeNotificationZNode.path：这个路径用于通知配置实体（如Broker、Topic等）的变更。
+    //DeleteTopicsZNode.path：这个路径用于处理删除主题的请求。
+    //BrokerSequenceIdZNode.path：这个路径用于存储Broker的序列号信息，用于确保Broker操作的顺序性。
+    //IsrChangeNotificationZNode.path：这个路径用于通知In-Sync Replica（ISR）的变化，ISR是指与Leader保持同步的副本集合。
+    //ProducerIdBlockZNode.path：这个路径用于存储生产者ID块的信息，生产者ID是分配给每个生产者的唯一的标识符。
+    //LogDirEventNotificationZNode.path：这个路径用于通知日志目录事件，例如日志文件的创建和删除。
+    //ConfigEntityTypeZNode.path：这是一个泛型节点路径，用于存储不同配置实体类型的路径。
+    //public static final String TOPIC = "topics";
+    //    public static final String CLIENT = "clients";
+    //    public static final String USER = "users";
+    //    public static final String BROKER = "brokers";
+    //    public static final String IP = "ips";
     _zkClient.createTopLevelPaths()
   }
 

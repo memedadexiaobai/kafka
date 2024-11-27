@@ -2281,11 +2281,11 @@ object KafkaZkClient {
   ): KafkaZkClient = {
 
     /* ZooKeeper 3.6.0 changed the default configuration for JUTE_MAXBUFFER from 4 MB to 1 MB.
-     * This causes a regression if Kafka tries to retrieve a large amount of data across many
-     * znodes – in such a case the ZooKeeper client will repeatedly emit a message of the form
+     * This causes a regression(回归) if Kafka tries to retrieve a large amount of data across many
+     * znodes – in such a case the ZooKeeper client will repeatedly emit(发出) a message of the form
      * "java.io.IOException: Packet len <####> is out of range".
      *
-     * We restore the 3.4.x/3.5.x behavior unless the caller has set the property (note that ZKConfig
+     * We restore(恢复) the 3.4.x/3.5.x behavior unless the caller has set the property (note that ZKConfig
      * auto configures itself if certain system properties have been set).
      *
      * See https://github.com/apache/zookeeper/pull/1129 for the details on why the behavior
@@ -2296,6 +2296,7 @@ object KafkaZkClient {
 
     if (createChrootIfNecessary) {
       val chrootIndex = connectString.indexOf("/")
+      //处理存在同一个zookeeper，不同chroot的情况 如：chroot=localhost1:2181,localhost2:2181,localhost3:2181/kafka
       if (chrootIndex > 0) {
         val zkConnWithoutChrootForChrootCreation = connectString.substring(0, chrootIndex)
         val zkClientForChrootCreation = apply(zkConnWithoutChrootForChrootCreation, isSecure, sessionTimeoutMs,

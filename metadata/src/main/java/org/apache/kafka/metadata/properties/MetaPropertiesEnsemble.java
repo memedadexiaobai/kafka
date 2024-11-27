@@ -117,12 +117,13 @@ public final class MetaPropertiesEnsemble {
 
         public MetaPropertiesEnsemble load() throws IOException  {
             if (logDirs.isEmpty()) {
-                throw new RuntimeException("You must specify at least one log directory.");
+                throw new RuntimeException("You must specify(指定) at least one log directory.");
             }
             Set<String> emptyLogDirs = new HashSet<>();
             Set<String> errorLogDirs = new HashSet<>();
             Map<String, MetaProperties> logDirProps = new HashMap<>();
             for (String logDir : logDirs) {
+                //meta.properties
                 String metaPropsFile = new File(logDir, META_PROPERTIES_NAME).getAbsolutePath();
                 try {
                     Properties props = PropertiesUtils.readPropertiesFile(metaPropsFile);
@@ -453,14 +454,14 @@ public final class MetaPropertiesEnsemble {
     }
 
     /**
-     * Verify that the metadata properties ensemble is valid.
+     * Verify(验证) that the metadata properties ensemble(整体，成套的东西) is valid.
      *
-     * We verify that v1 meta.properties files always have cluster.id set. v0 files may or may not
-     * have it set. If it is set, the cluster ID must be the same in all directories.
+     * We verify that v1 meta.properties files always have cluster.id set.
+     * v0 files may or may not have it set. If it is set, the cluster ID must be the same in all directories.
      *
-     * We verify that v1 meta.properties files always have node.id set. v0 files may or may not have
-     * it set. If it is set in v0, it will be called broker.id rather than node.id. Node ID must be
-     * the same in call directories.
+     * We verify that v1 meta.properties files always have node.id set.
+     * v0 files may or may not have it set. If it is set in v0, it will be called broker.id rather than node.id.
+     * Node ID must be the same in call directories.
      *
      * directory.id may or may not be set, in both v0 and v1. If it is set, it must not be the same
      * in multiple directories, and it must be safe.
