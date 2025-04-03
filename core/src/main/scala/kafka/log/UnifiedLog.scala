@@ -2019,7 +2019,7 @@ object UnifiedLog extends Logging {
     val topicPartition = UnifiedLog.parseTopicPartitionName(dir)
     val segments = new LogSegments(topicPartition)
     // The created leaderEpochCache will be truncated by LogLoader if necessary
-    // so it is guaranteed that the epoch entries will be correct even when on-disk
+    // so it is guaranteed(必然的) that the epoch entries will be correct(合适的，准确的) even when(词组，即使当) on-disk
     // checkpoint was stale (due to async nature of LeaderEpochFileCache#truncateFromStart/End).
     val leaderEpochCache = UnifiedLog.maybeCreateLeaderEpochCache(
       dir,
@@ -2029,9 +2029,12 @@ object UnifiedLog extends Logging {
       s"[UnifiedLog partition=$topicPartition, dir=${dir.getParent}] ",
       None,
       scheduler)
+
     val producerStateManager = new ProducerStateManager(topicPartition, dir,
       maxTransactionTimeoutMs, producerStateManagerConfig, time)
+
     val isRemoteLogEnabled = UnifiedLog.isRemoteLogEnabled(remoteStorageSystemEnable, config, topicPartition.topic)
+
     val offsets = new LogLoader(
       dir,
       topicPartition,
@@ -2048,8 +2051,10 @@ object UnifiedLog extends Logging {
       numRemainingSegments,
       isRemoteLogEnabled,
     ).load()
+
     val localLog = new LocalLog(dir, config, segments, offsets.recoveryPoint,
       offsets.nextOffsetMetadata, scheduler, time, topicPartition, logDirFailureChannel)
+
     new UnifiedLog(offsets.logStartOffset,
       localLog,
       brokerTopicStats,

@@ -126,7 +126,7 @@ class TransactionStateManager(brokerId: Int,
             false
           } else {
             txnMetadata.state match {
-              case Ongoing =>
+              case Ongoing => //正在进行的事务
                 txnMetadata.txnStartTimestamp + txnMetadata.txnTimeoutMs < now
               case _ => false
             }
@@ -161,6 +161,7 @@ class TransactionStateManager(brokerId: Int,
             recordsBuilder = null
           }
 
+          //循环所有事物元数据
           while (stateEntries.hasNext) {
             val txnMetadata = stateEntries.head
             val transactionalId = txnMetadata.transactionalId
@@ -236,6 +237,7 @@ class TransactionStateManager(brokerId: Int,
     inReadLock(stateLock) {
       transactionMetadataCache.forKeyValue { (partitionId, partitionCacheEntry) =>
         val transactionPartition = new TopicPartition(Topic.TRANSACTION_STATE_TOPIC_NAME, partitionId)
+        //将过期事务id落库
         removeExpiredTransactionalIds(transactionPartition, partitionCacheEntry)
       }
     }
@@ -372,6 +374,7 @@ class TransactionStateManager(brokerId: Int,
                                              createdTxnMetadataOpt: Option[TransactionMetadata]): Either[Errors, Option[CoordinatorEpochAndTxnMetadata]] = {
     inReadLock(stateLock) {
       val partitionId = partitionFor(transactionalId)
+      //协调者正在加载分区 不处理
       if (loadingPartitions.exists(_.txnPartitionId == partitionId))
         Left(Errors.COORDINATOR_LOAD_IN_PROGRESS)
       else {

@@ -39,6 +39,13 @@ import org.apache.kafka.server.util.{InterBrokerSendThread, RequestAndCompletion
 import scala.collection.{concurrent, immutable}
 import scala.jdk.CollectionConverters._
 
+/**
+ * TransactionMarkerChannelManager 是一个与消息队列和事务消息处理相关的组件。虽然参考资料中没有直接提到 TransactionMarkerChannelManager，但根据其名称和通常的命名惯例，我们可以推测它的主要职责如下：
+ * 管理事务标记通道：TransactionMarkerChannelManager 可能负责管理和维护事务消息的标记通道。事务消息是指那些需要在发送和提交之间保持一致性的消息，通常用于分布式事务场景。
+ * 事务消息的生命周期管理：它可能负责处理事务消息的生命周期，包括事务的开始、提交和回滚。这涉及到在消息队列中设置和检查事务标记，以确保消息的可靠性和一致性。
+ * 协调生产者和消费者：在事务消息的发送过程中，TransactionMarkerChannelManager 可能协调生产者和消费者之间的通信，确保事务消息在生产者提交事务之前不会被消费者消费。
+ * 错误处理和重试机制：它可能还负责处理事务消息发送过程中的错误，并提供重试机制，以确保事务的最终一致性。
+ */
 object TransactionMarkerChannelManager {
   private val UnknownDestinationQueueSizeMetricName = "UnknownDestinationQueueSize"
   private val LogAppendRetryQueueSizeMetricName = "LogAppendRetryQueueSize"
@@ -55,6 +62,7 @@ object TransactionMarkerChannelManager {
             txnStateManager: TransactionStateManager,
             time: Time,
             logContext: LogContext): TransactionMarkerChannelManager = {
+
     val channelBuilder = ChannelBuilders.clientChannelBuilder(
       config.interBrokerSecurityProtocol,
       JaasContext.Type.SERVER,
@@ -65,10 +73,12 @@ object TransactionMarkerChannelManager {
       config.saslInterBrokerHandshakeRequestEnable,
       logContext
     )
+
     channelBuilder match {
       case reconfigurable: Reconfigurable => config.addReconfigurable(reconfigurable)
       case _ =>
     }
+
     val selector = new Selector(
       NetworkReceive.UNLIMITED,
       config.connectionsMaxIdleMs,
@@ -111,8 +121,7 @@ object TransactionMarkerChannelManager {
 
 class TxnMarkerQueue(@volatile var destination: Node) extends Logging {
 
-  // keep track of the requests per txn topic partition so we can easily clear the queue
-  // during partition emigration
+  // keep track of the requests per txn topic partition so we can easily clear the queue during partition emigration
   private val markersPerTxnTopicPartition = new ConcurrentHashMap[Int, BlockingQueue[PendingCompleteTxnAndMarkerEntry]]().asScala
 
   def removeMarkersForTxnTopicPartition(partition: Int): Option[BlockingQueue[PendingCompleteTxnAndMarkerEntry]] = {
@@ -222,6 +231,15 @@ class TransactionMarkerChannelManager(
 
   private def retryLogAppends(): Unit = {
     val txnLogAppendRetries: util.List[PendingCompleteTxn] = new util.ArrayList[PendingCompleteTxn]()
+    //LinkedBlockingQueue 中的 drainTo 方法用于将队列中的所有可用元素转移到另一个集合中。
+    // 这个方法在处理大量消息或任务时非常有用，可以一次性批量处理队列中的元素，而不是逐个处理。
+    // public int drainTo(Collection<? super E> c)
+    // c: 目标集合，接收从队列中移除的元素。该集合的元素类型必须能够容纳队列中的元素类型
+    // 返回值：返回从队列中移除并转移到目标集合的元素数量
+    //特点
+    // 1.非阻塞：drainTo 方法是非阻塞的，它会立即返回，不会等待队列中有更多元素可用。如果队列为空，它会立即返回 0。
+    // 2.批量处理：可以一次性处理多个元素，提高处理效率。
+    // 3.线程安全：drainTo 方法是线程安全的，可以在多线程环境中使用。
     txnLogAppendRetryQueue.drainTo(txnLogAppendRetries)
     txnLogAppendRetries.forEach { txnLogAppend =>
       debug(s"Retry appending $txnLogAppend transaction log")
@@ -230,7 +248,9 @@ class TransactionMarkerChannelManager(
   }
 
   override def generateRequests(): util.Collection[RequestAndCompletionHandler] = {
+    //把txnLogAppendRetryQueue中的日志写试下追加落库
     retryLogAppends()
+
     val pendingCompleteTxnAndMarkerEntries = new util.ArrayList[PendingCompleteTxnAndMarkerEntry]()
     markersQueueForUnknownBroker.forEachTxnTopicPartition { case (_, queue) =>
       queue.drainTo(pendingCompleteTxnAndMarkerEntries)
@@ -383,7 +403,9 @@ class TransactionMarkerChannelManager(
                                  result: TransactionResult,
                                  pendingCompleteTxn: PendingCompleteTxn,
                                  topicPartitions: immutable.Set[TopicPartition]): Unit = {
+    // 通过事务id的绝对值hashcode来对事务主题的总分区数进行求余，得到事务对应的分区
     val txnTopicPartition = txnStateManager.partitionFor(pendingCompleteTxn.transactionalId)
+    // 按照领导者节点进行分组
     val partitionsByDestination: immutable.Map[Option[Node], immutable.Set[TopicPartition]] = topicPartitions.groupBy { topicPartition: TopicPartition =>
       metadataCache.getPartitionLeaderEndpoint(topicPartition.topic, topicPartition.partition, interBrokerListenerName)
     }
@@ -391,19 +413,20 @@ class TransactionMarkerChannelManager(
     val coordinatorEpoch = pendingCompleteTxn.coordinatorEpoch
     for ((broker: Option[Node], topicPartitions: immutable.Set[TopicPartition]) <- partitionsByDestination) {
       broker match {
+        //If the leader is known, and the listener name is available, return Some(node).
         case Some(brokerNode) =>
           val marker = new TxnMarkerEntry(producerId, producerEpoch, coordinatorEpoch, result, topicPartitions.toList.asJava)
           val pendingCompleteTxnAndMarker = PendingCompleteTxnAndMarkerEntry(pendingCompleteTxn, marker)
 
           if (brokerNode == Node.noNode) {
             // if the leader of the partition is known but node not available, put it into an unknown broker queue
-            // and let the sender thread to look for its broker and migrate them later
+            // and let the sender thread to look for its broker and migrate(迁移) them later
             markersQueueForUnknownBroker.addMarkers(txnTopicPartition, pendingCompleteTxnAndMarker)
           } else {
             addMarkersForBroker(brokerNode, txnTopicPartition, pendingCompleteTxnAndMarker)
           }
 
-        case None =>
+        case None => // if the leader is not known, return None
           val transactionalId = pendingCompleteTxn.transactionalId
           txnStateManager.getTransactionState(transactionalId) match {
             case Left(error) =>
@@ -418,7 +441,7 @@ class TransactionMarkerChannelManager(
                 // if the leader of the partition is unknown, skip sending the txn marker since
                 // the partition is likely to be deleted already
                 info(s"Couldn't find leader endpoint for partitions $topicPartitions while trying to send transaction markers for " +
-                  s"$transactionalId, these partitions are likely deleted already and hence can be skipped")
+                  s"$transactionalId, these partitions are likely deleted already and hence(因此) can be skipped")
 
                 val txnMetadata = epochAndMetadata.transactionMetadata
 

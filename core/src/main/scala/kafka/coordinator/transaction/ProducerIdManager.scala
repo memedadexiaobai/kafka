@@ -133,7 +133,7 @@ class ZkProducerIdManager(brokerId: Int, zkClient: KafkaZkClient) extends Produc
 
   def generateProducerId(): Try[Long] = {
     this synchronized {
-      // grab a new block of producerIds if this block has been exhausted
+      // grab(抓住) a new block of producerIds if this block has been exhausted
       if (nextProducerId > currentProducerIdBlock.lastProducerId) {
         try {
           allocateNewProducerIdBlock()

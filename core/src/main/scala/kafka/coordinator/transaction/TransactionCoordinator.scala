@@ -59,6 +59,7 @@ object TransactionCoordinator {
       time, metrics)
 
     val logContext = new LogContext(s"[TransactionCoordinator id=${config.brokerId}] ")
+
     val txnMarkerChannelManager = TransactionMarkerChannelManager(config, metrics, metadataCache, txnStateManager,
       time, logContext)
 
@@ -517,10 +518,18 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
           val coordinatorEpoch = epochAndTxnMetadata.coordinatorEpoch
 
           txnMetadata.inLock {
-            if (txnMetadata.producerId != producerId)
+            if (txnMetadata.producerId != producerId) //生产者id必须一致
               Left(Errors.INVALID_PRODUCER_ID_MAPPING)
             // Strict equality is enforced on the client side requests, as they shouldn't bump the producer epoch.
-            else if ((isFromClient && producerEpoch != txnMetadata.producerEpoch) || producerEpoch < txnMetadata.producerEpoch)
+            else if ((isFromClient && producerEpoch != txnMetadata.producerEpoch) || producerEpoch < txnMetadata.producerEpoch) //当请求来自于客户端时，生产者epoch必须一致 producerEpoch不能小于原数据producerEpoch
+              Left(Errors.PRODUCER_FENCED)
+            else if (producerEpoch < txnMetadata.lastProducerEpoch) //生产者producerEpoch不能小于原数据最后一条producerEpoch
+              Left(Errors.PRODUCER_FENCED)
+            else if (producerEpoch > txnMetadata.lastProducerEpoch)
+              txnMetadata.lastProducerEpoch = producerEpoch
+            else if (txnMetadata.state == Dead)
+              Left(Errors.TRANSACTIONAL_ID_NOT_FOUND)
+            else if (txnMetadata.state == PrepareEpochFence)
               Left(Errors.PRODUCER_FENCED)
             else if (txnMetadata.pendingTransitionInProgress && txnMetadata.pendingState.get != PrepareEpochFence)
               Left(Errors.CONCURRENT_TRANSACTIONS)
@@ -691,7 +700,7 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
   }
 
   private[transaction] def abortTimedOutTransactions(onComplete: TransactionalIdAndProducerIdEpoch => EndTxnCallback): Unit = {
-
+    // 从transactionMetadataCache找出正在进行的事务中 已经超时的事务
     txnManager.timedOutTransactions().foreach { txnIdAndPidEpoch =>
       txnManager.getTransactionState(txnIdAndPidEpoch.transactionalId).foreach {
         case None =>
@@ -702,19 +711,19 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
           val transitMetadataOpt = txnMetadata.inLock {
             if (txnMetadata.producerId != txnIdAndPidEpoch.producerId) {
               error(s"Found incorrect producerId when expiring transactionalId: ${txnIdAndPidEpoch.transactionalId}. " +
-                s"Expected producerId: ${txnIdAndPidEpoch.producerId}. Found producerId: " +
-                s"${txnMetadata.producerId}")
+                s"Expected producerId: ${txnIdAndPidEpoch.producerId}. Found producerId: " + s"${txnMetadata.producerId}")
               None
             } else if (txnMetadata.pendingTransitionInProgress) {
-              debug(s"Skipping abort of timed out transaction $txnIdAndPidEpoch since there is a " +
-                "pending state transition")
+              debug(s"Skipping abort of timed out transaction $txnIdAndPidEpoch since there is a " + "pending state transition(过渡)")
               None
             } else {
+              // 这里做了事务状态性的相关校验 返回数据包含了新的事物状态
               Some(txnMetadata.prepareFenceProducerEpoch())
             }
           }
 
           transitMetadataOpt.foreach { txnTransitMetadata =>
+            //结束事务
             endTransaction(txnMetadata.transactionalId,
               txnTransitMetadata.producerId,
               txnTransitMetadata.producerEpoch,
@@ -734,7 +743,7 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
     info("Starting up.")
     scheduler.startup()
     scheduler.schedule("transaction-abort",
-      () => abortTimedOutTransactions(onEndTransactionComplete),
+      () => abortTimedOutTransactions(onEndTransactionComplete), //清理过期事物
       txnConfig.abortTimedOutTransactionsIntervalMs,
       txnConfig.abortTimedOutTransactionsIntervalMs
     )

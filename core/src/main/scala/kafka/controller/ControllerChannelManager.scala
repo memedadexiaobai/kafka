@@ -121,6 +121,7 @@ class ControllerChannelManager(controllerEpoch: () => Int,
     val controllerToBrokerSecurityProtocol = config.controlPlaneSecurityProtocol.getOrElse(config.interBrokerSecurityProtocol)
     val brokerNode = broker.node(controllerToBrokerListenerName)
     val logContext = new LogContext(s"[Controller id=${config.brokerId}, targetBrokerId=${brokerNode.idString}] ")
+
     val (networkClient, reconfigurableChannelBuilder) = {
       val channelBuilder = ChannelBuilders.clientChannelBuilder(
         controllerToBrokerSecurityProtocol,
@@ -361,12 +362,14 @@ class ControllerBrokerRequestBatch(
  * Structure to send RPCs from controller to broker to inform about the metadata and leadership
  * changes in the system.
  * @param config Kafka config present in the controller.
- * @param metadataProvider Provider to provide the relevant metadata to build the state needed to
- *                         send RPCs
+ * @param metadataProvider Provider to provide the relevant metadata to build the state needed to send RPCs
  * @param metadataVersionProvider Provider to provide the metadata version used by the controller.
  * @param stateChangeLogger logger to log the various events while sending requests and receiving
  *                          responses from the brokers
  * @param kraftController whether the controller is KRaft controller
+ *
+ * 围绕leaderAndIsrRequestMap、stopReplicaRequestMap、updateMetadataRequestBrokerSet、updateMetadataRequestPartitionInfoMap创建数据、清理数据
+ * addXX代表添加数据到集合 sendXXX代表发送请求 handXXX均是抽象方法待实现
  */
 abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
                                                     metadataProvider: () => ControllerChannelContext,

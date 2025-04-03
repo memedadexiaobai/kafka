@@ -48,14 +48,23 @@ object LeaderAndIsr {
   def duringDelete(isr: List[Int]): LeaderAndIsr = LeaderAndIsr(LeaderDuringDelete, isr)
 }
 
+/**
+ * 领导者和ISR集合
+ * 注意：leaderEpoch是单调递增的，每次 +1
+ * @param leader
+ * @param leaderEpoch
+ * @param leaderRecoveryState
+ * @param isrWithBrokerEpoch
+ * @param partitionEpoch
+ */
 case class LeaderAndIsr(
   leader: Int,
   leaderEpoch: Int,
   leaderRecoveryState: LeaderRecoveryState,
   isrWithBrokerEpoch: List[BrokerState],
-  // The current epoch for the partition for KRaft controllers. The current ZK version for the
-  // legacy controllers. The epoch is a monotonically increasing value which is incremented
-  // after every partition change.
+  // The current epoch for the partition for KRaft controllers.
+  // The current ZK version for the legacy controllers.
+  // The epoch is a monotonically(单调) increasing value which is incremented after every partition change.
   partitionEpoch: Int
 ) {
   def withPartitionEpoch(partitionEpoch: Int): LeaderAndIsr = copy(partitionEpoch = partitionEpoch)

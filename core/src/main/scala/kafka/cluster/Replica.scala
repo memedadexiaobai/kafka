@@ -36,18 +36,19 @@ case class ReplicaState(
   // log's end offset, for remote replicas its value is only updated by follower fetch.
   logEndOffsetMetadata: LogOffsetMetadata,
 
-  // The log end offset value at the time the leader received the last FetchRequest from this follower.
-  // This is used to determine the lastCaughtUpTimeMs of the follower. It is reset by the leader
-  // when a LeaderAndIsr request is received and might be reset when the leader appends a record
-  // to its log.
+  // The log end offset value at the time(在...期间) the leader received the last FetchRequest from this follower.
+  // This is used to determine(确定) the lastCaughtUpTimeMs of the follower.
+  // It is reset by the leader when a LeaderAndIsr request is received
+  // and might be reset when the leader appends a record to its log.
   lastFetchLeaderLogEndOffset: Long,
 
   // The time when the leader received the last FetchRequest from this follower.
   // This is used to determine the lastCaughtUpTimeMs of the follower.
   lastFetchTimeMs: Long,
 
-  // lastCaughtUpTimeMs is the largest time t such that the offset of most recent FetchRequest from this follower >=
-  // the LEO of leader at time t. This is used to determine the lag of this follower and ISR of this partition.
+  // lastCaughtUpTimeMs is the largest time t such that(使得满足…的条件;是这样…;以致如此)
+  // the offset of most recent FetchRequest from this follower >= the LEO of leader at time(偶而指定设备执行该命令的时间指定设备执行本命令的时间) t.
+  // This is used to determine the lag of this follower and ISR of this partition.
   lastCaughtUpTimeMs: Long,
 
   // The brokerEpoch is the epoch from the Fetch request.
@@ -59,10 +60,9 @@ case class ReplicaState(
   def logEndOffset: Long = logEndOffsetMetadata.messageOffset
 
   /**
-   * Returns true when the replica is considered as "caught-up". A replica is
-   * considered "caught-up" when its log end offset is equals to the log end
-   * offset of the leader OR when its last caught up time minus the current
-   * time is smaller than the max replica lag.
+   * Returns true when the replica is considered as "caught-up".
+   * A replica is considered "caught-up(赶上了)" when its log end offset is equals to the log end offset of the leader
+   * OR when its last caught up time minus the current time is smaller than the max replica lag(滞后).
    */
   def isCaughtUp(
     leaderEndOffset: Long,

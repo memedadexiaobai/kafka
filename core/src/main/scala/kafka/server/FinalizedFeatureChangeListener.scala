@@ -139,9 +139,9 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
   }
 
   /**
-   * A shutdownable thread to process feature node change notifications that are populated into the
-   * queue. If any change notification can not be processed successfully (unless it is due to an
-   * interrupt), the thread treats it as a fatal event and triggers Broker exit.
+   * A shutdownable thread to process feature node change notifications that are populated into the queue.
+   * If any change notification can not be processed successfully (unless it is due to an
+   * interrupt), the thread treats it as a fatal(致命的) event and triggers Broker exit.
    *
    * @param name   name of the thread
    */
@@ -209,11 +209,11 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
 
   /**
    * This method initializes the feature ZK node change listener. Optionally, it also ensures to
-   * update the FinalizedFeatureCache once with the latest contents of the feature ZK node
-   * (if the node exists). This step helps ensure that feature incompatibilities (if any) in brokers
-   * are conveniently detected before the initOrThrow() method returns to the caller. If feature
-   * incompatibilities are detected, this method will throw an Exception to the caller, and the Broker
-   * will exit eventually.
+   * update the FinalizedFeatureCache once with the latest contents of the feature ZK node (if the node exists).
+   * This step helps ensure that feature incompatibilities(不兼容性) (if any) in brokers
+   * are conveniently(方便的) detected before the initOrThrow() method returns to the caller.
+   * If feature incompatibilities are detected, this method will throw an Exception to the caller, and the Broker
+   * will exit eventually(最后).
    *
    * @param waitOnceForCacheUpdateMs   # of milli seconds to wait for feature cache to be updated once.
    *                                   (should be > 0)
@@ -229,8 +229,8 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
     thread.start()
     zkClient.registerStateChangeHandler(ZkStateChangeHandler)
     zkClient.registerZNodeChangeHandlerAndCheckExistence(FeatureZNodeChangeHandler)
-    val ensureCacheUpdateOnce = new FeatureCacheUpdater(
-      FeatureZNodeChangeHandler.path, Some(new CountDownLatch(1)))
+    val ensureCacheUpdateOnce = new FeatureCacheUpdater(FeatureZNodeChangeHandler.path, Some(new CountDownLatch(1)))
+    //thread:ChangeNotificationProcessorThread启动后会读取queue去处理，这里相当于放进去了一个任务
     queue.add(ensureCacheUpdateOnce)
     try {
       ensureCacheUpdateOnce.awaitUpdateOrThrow(waitOnceForCacheUpdateMs)

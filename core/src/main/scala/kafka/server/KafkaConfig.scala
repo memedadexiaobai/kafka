@@ -157,7 +157,7 @@ object KafkaConfig {
   }
 
   /**
-   * Copy a configuration map, populating some keys that we want to treat as synonyms.
+   * Copy a configuration map, populating(迁移) some keys that we want to treat as synonyms(同义词).
    */
   def populateSynonyms(input: util.Map[_, _]): util.Map[Any, Any] = {
     val output = new util.HashMap[Any, Any](input)
@@ -860,7 +860,7 @@ class KafkaConfig private(doLog: Boolean, val props: util.Map[_, _])
     }
   }
 
-  // Topic IDs are used with all self-managed quorum clusters and ZK cluster with IBP greater than or equal to 2.8
+  // Topic IDs are used with all self-managed quorum clusters(所有自我管理的仲裁集群) and ZK cluster with IBP greater than or equal to 2.8
   def usesTopicId: Boolean =
     usesSelfManagedQuorum || interBrokerProtocolVersion.isTopicIdsSupported
 

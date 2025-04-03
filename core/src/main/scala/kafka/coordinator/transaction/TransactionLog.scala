@@ -30,16 +30,16 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
 /**
- * Messages stored for the transaction topic represent the producer id and transactional status of the corresponding
- * transactional id, which have versions for both the key and value fields. Key and value
- * versions are used to evolve the message formats:
+ * Messages stored for the transaction topic represent the producer id and transactional status of the corresponding transactional id,
+ * which have versions for both the key and value fields.
+ * Key and value versions are used to evolve the message formats:
  *
  * key version 0:               [transactionalId]
  *    -> value version 0:       [producer_id, producer_epoch, expire_timestamp, status, [topic, [partition] ], timestamp]
  */
 object TransactionLog {
 
-  // enforce always using
+  // enforce(执行) always using
   //  1. cleanup policy = compact
   //  2. compression = none
   //  3. unclean leader election = disabled

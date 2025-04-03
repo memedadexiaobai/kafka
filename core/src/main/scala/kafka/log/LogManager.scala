@@ -52,14 +52,15 @@ import java.util
 import scala.annotation.nowarn
 
 /**
- * The entry point to the kafka log management subsystem. The log manager is responsible for log creation, retrieval, and cleaning.
- * All read and write operations are delegated to the individual log instances.
+ * The entry point to the kafka log management subsystem.
+ * The log manager is responsible for log creation, retrieval, and cleaning. 日志的创建、检索、清理
+ * All read and write operations are delegated(委托，选派) to the individual log instances.
  *
  * The log manager maintains logs in one or more directories. New logs are created in the data directory
- * with the fewest logs. No attempt is made to move partitions after the fact or balance based on
- * size or I/O rate.
+ * with the fewest logs. No attempt is made to move partitions after the fact(after the fact：事后) or balance based on size or I/O rate.
+ * 事后不会尝试移动分区，也不会根据大小或I/O速率进行平衡。
  *
- * A background thread handles log retention by periodically truncating excess log segments.
+ * A background thread handles log retention by periodically truncating excess(过量的) log segments.
  */
 @threadsafe
 class LogManager(logDirs: Seq[File],
@@ -148,7 +149,7 @@ class LogManager(logDirs: Seq[File],
   // A map that stores hadCleanShutdown flag for each log dir.
   private val hadCleanShutdownFlags = new ConcurrentHashMap[String, Boolean]()
 
-  // A map that tells whether all logs in a log dir had been loaded or not at startup time.
+  // A map that tells whether all logs in a log dir had been loaded or not at startup time. 目录->当前目录是否处理完毕
   private val loadLogsCompletedFlags = new ConcurrentHashMap[String, Boolean]()
 
   @volatile private var _cleaner: LogCleaner = _
@@ -355,8 +356,8 @@ class LogManager(logDirs: Seq[File],
       addLogToBeDeleted(log)
     } else if (logDir.getName.endsWith(UnifiedLog.StrayDirSuffix)) {
       addStrayLog(topicPartition, log)
-      warn(s"Loaded stray log: $logDir")
-    } else if (isStray(log)) {
+      warn(s"Loaded stray(偏离) log: $logDir")
+    } else if (isStray(log)) {//默认false
       // Unlike Zookeeper mode, which tracks pending topic deletions under a ZNode, KRaft is unable to prevent a topic from being recreated before every replica has been deleted.
       // A KRaft broker with an offline directory may be unable to detect it still holds a to-be-deleted replica,
       // and can create a conflicting topic partition for a new incarnation of the topic in one of the remaining online directories.
@@ -412,11 +413,11 @@ class LogManager(logDirs: Seq[File],
   private[log] def loadLogs(defaultConfig: LogConfig, topicConfigOverrides: Map[String, LogConfig], isStray: UnifiedLog => Boolean): Unit = {
     info(s"Loading logs from log dirs $liveLogDirs")
     val startMs = time.hiResClockMs()
-    val threadPools = ArrayBuffer.empty[ExecutorService]
+    val threadPools = ArrayBuffer.empty[ExecutorService] //每个目录一个线程池
     val offlineDirs = mutable.Set.empty[(String, IOException)]
-    val jobs = ArrayBuffer.empty[Seq[Future[_]]]
-    var numTotalLogs = 0
-    // log dir path -> number of Remaining logs map for remainingLogsToRecover metric
+    val jobs = ArrayBuffer.empty[Seq[Future[_]]] //一共有多少个job 一个文件对应一个任务，也可以理解为有多少个文件需要处理
+    var numTotalLogs = 0 //一共有多少需要处理的文件
+    // log dir path -> number of Remaining logs map for remainingLogsToRecover metric 目录->该目录需要处理的文件
     val numRemainingLogs: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]
     // log recovery thread name -> number of remaining segments map for remainingSegmentsToRecover metric
     val numRemainingSegments: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]
@@ -431,8 +432,7 @@ class LogManager(logDirs: Seq[File],
       val logDirAbsolutePath = dir.getAbsolutePath
       var hadCleanShutdown: Boolean = false
       try {
-        val pool = Executors.newFixedThreadPool(numRecoveryThreadsPerDataDir,
-          new LogRecoveryThreadFactory(logDirAbsolutePath))
+        val pool = Executors.newFixedThreadPool(numRecoveryThreadsPerDataDir, new LogRecoveryThreadFactory(logDirAbsolutePath))
         threadPools.append(pool)
 
         val cleanShutdownFileHandler = new CleanShutdownFileHandler(dir.getPath)
@@ -446,6 +446,7 @@ class LogManager(logDirs: Seq[File],
 
         var recoveryPoints = Map[TopicPartition, Long]()
         try {
+          //通过 OffsetCheckpointFile 读取数据
           recoveryPoints = this.recoveryPointCheckpoints(dir).read()
         } catch {
           case e: Exception =>
@@ -455,6 +456,7 @@ class LogManager(logDirs: Seq[File],
 
         var logStartOffsets = Map[TopicPartition, Long]()
         try {
+          //通过 OffsetCheckpointFile 读取数据 原理是一样的 格式也一样
           logStartOffsets = this.logStartOffsetCheckpoints(dir).read()
         } catch {
           case e: Exception =>
@@ -464,10 +466,10 @@ class LogManager(logDirs: Seq[File],
 
         val logsToLoad = Option(dir.listFiles).getOrElse(Array.empty).filter(logDir =>
           logDir.isDirectory &&
-            // Ignore remote-log-index-cache directory as that is index cache maintained by tiered storage subsystem
+            // Ignore remote-log-index-cache directory as that is index cache maintained by tiered(分层的) storage subsystem
             // but not any topic-partition dir.
             !logDir.getName.equals(RemoteIndexCache.DIR_NAME) &&
-            UnifiedLog.parseTopicPartitionName(logDir).topic != KafkaRaftServer.MetadataTopic)
+            UnifiedLog.parseTopicPartitionName(logDir).topic != KafkaRaftServer.MetadataTopic) //__cluster_metadata
         numTotalLogs += logsToLoad.length
         numRemainingLogs.put(logDirAbsolutePath, logsToLoad.length)
         loadLogsCompletedFlags.put(logDirAbsolutePath, logsToLoad.isEmpty)
@@ -575,7 +577,7 @@ class LogManager(logDirs: Seq[File],
    *  Start the background threads to flush logs and do log cleanup
    */
   def startup(topicNames: Set[String], isStray: UnifiedLog => Boolean = _ => false): Unit = {
-    // ensure consistency between default config and overrides
+    // ensure consistency(一致性) between default config and overrides
     val defaultConfig = currentDefaultConfig
     startupWithConfigOverrides(defaultConfig, fetchTopicConfigOverrides(defaultConfig, topicNames), isStray)
   }
@@ -583,9 +585,11 @@ class LogManager(logDirs: Seq[File],
   // visible for testing
   @nowarn("cat=deprecation")
   private[log] def fetchTopicConfigOverrides(defaultConfig: LogConfig, topicNames: Set[String]): Map[String, LogConfig] = {
+    //key为主题名 value为logConfig:包含所有的配置和覆盖的配置key
     val topicConfigOverrides = mutable.Map[String, LogConfig]()
     val defaultProps = defaultConfig.originals()
     topicNames.foreach { topicName =>
+      //拉取远程配置
       var overrides = configRepository.topicConfig(topicName)
       // save memory by only including configs for topics with overrides
       if (!overrides.isEmpty) {
@@ -620,31 +624,23 @@ class LogManager(logDirs: Seq[File],
     defaultConfig: LogConfig,
     topicConfigOverrides: Map[String, LogConfig],
     isStray: UnifiedLog => Boolean): Unit = {
+
     loadLogs(defaultConfig, topicConfigOverrides, isStray) // this could take a while if shutdown was not clean
 
     /* Schedule the cleanup task to delete old logs */
     if (scheduler != null) {
       info("Starting log cleanup with a period of %d ms.".format(retentionCheckMs))
       scheduler.schedule("kafka-log-retention",
-                         () => cleanupLogs(),
-                         initialTaskDelayMs,
-                         retentionCheckMs)
+                         () => cleanupLogs(), initialTaskDelayMs, retentionCheckMs)
       info("Starting log flusher with a default period of %d ms.".format(flushCheckMs))
       scheduler.schedule("kafka-log-flusher",
-                         () => flushDirtyLogs(),
-                         initialTaskDelayMs,
-                         flushCheckMs)
+                         () => flushDirtyLogs(), initialTaskDelayMs, flushCheckMs)
       scheduler.schedule("kafka-recovery-point-checkpoint",
-                         () => checkpointLogRecoveryOffsets(),
-                         initialTaskDelayMs,
-                         flushRecoveryOffsetCheckpointMs)
+                         () => checkpointLogRecoveryOffsets(), initialTaskDelayMs, flushRecoveryOffsetCheckpointMs)
       scheduler.schedule("kafka-log-start-offset-checkpoint",
-                         () => checkpointLogStartOffsets(),
-                         initialTaskDelayMs,
-                         flushStartOffsetCheckpointMs)
+                         () => checkpointLogStartOffsets(), initialTaskDelayMs, flushStartOffsetCheckpointMs)
       scheduler.scheduleOnce("kafka-delete-logs", // will be rescheduled after each delete logs with a dynamic period
-                         () => deleteLogs(),
-                         initialTaskDelayMs)
+                         () => deleteLogs(), initialTaskDelayMs)
     }
     if (cleanerConfig.enableCleaner) {
       _cleaner = new LogCleaner(cleanerConfig, liveLogDirs, currentLogs, logDirFailureChannel, time = time)
@@ -1569,23 +1565,30 @@ object LogManager {
             brokerTopicStats: BrokerTopicStats,
             logDirFailureChannel: LogDirFailureChannel,
             keepPartitionMetadataFile: Boolean): LogManager = {
+    //抽取日志相关配置
     val defaultProps = config.extractLogConfigMap
 
     LogConfig.validateBrokerLogConfigValues(defaultProps, config.remoteLogManagerConfig.isRemoteStorageSystemEnabled())
+    //有存储就得清理  LogCleaner日志清理器
     val defaultLogConfig = new LogConfig(defaultProps)
-
     val cleanerConfig = LogCleaner.cleanerConfig(config)
 
     new LogManager(logDirs = config.logDirs.map(new File(_).getAbsoluteFile),
+      //初始化的时候这个是解析 meta.properties 文件失败的目录
       initialOfflineDirs = initialOfflineDirs.map(new File(_).getAbsoluteFile),
       configRepository = configRepository,
       initialDefaultConfig = defaultLogConfig,
       cleanerConfig = cleanerConfig,
+      //每个数据目录的恢复线程
       recoveryThreadsPerDataDir = config.numRecoveryThreadsPerDataDir,
+
       flushCheckMs = config.logFlushSchedulerIntervalMs,
+
       flushRecoveryOffsetCheckpointMs = config.logFlushOffsetCheckpointIntervalMs,
       flushStartOffsetCheckpointMs = config.logFlushStartOffsetCheckpointIntervalMs,
+
       retentionCheckMs = config.logCleanupIntervalMs,
+
       maxTransactionTimeoutMs = config.transactionMaxTimeoutMs,
       producerStateManagerConfig = new ProducerStateManagerConfig(config.producerIdExpirationMs, config.transactionPartitionVerificationEnable),
       producerIdExpirationCheckIntervalMs = config.producerIdExpirationCheckIntervalMs,
@@ -1593,6 +1596,7 @@ object LogManager {
       brokerTopicStats = brokerTopicStats,
       logDirFailureChannel = logDirFailureChannel,
       time = time,
+
       keepPartitionMetadataFile = keepPartitionMetadataFile,
       interBrokerProtocolVersion = config.interBrokerProtocolVersion,
       remoteStorageSystemEnable = config.remoteLogManagerConfig.isRemoteStorageSystemEnabled(),

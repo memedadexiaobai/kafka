@@ -102,6 +102,21 @@ object KafkaController extends Logging {
   )
 }
 
+/**
+ * 总的来说，包含2种：
+ * 1.ZNodeChangeHandler和ZNodeChildChangeHandler来处理zk节点的变更
+ * 2.ControllerEvent的实现类，包含了KafkaController会处理的所有事件
+ * KafkaController是整个Kafka集群的控制器，负责整个集群的管理，包括：
+ * 1. 选举控制器
+ * 2. 管理集群中的broker
+ * 3. 管理集群中的topic
+ * 4. 管理集群中的partition
+ * 5. 管理集群中的replica
+ * 6. 管理集群中的leader
+ * 7. 管理集群中的follower
+ * 8. 管理集群中的ISR
+ * 9. 管理集群中的ZK
+ */
 class KafkaController(val config: KafkaConfig,
                       zkClient: KafkaZkClient,
                       time: Time,
@@ -279,7 +294,7 @@ class KafkaController(val config: KafkaConfig,
    * 2. Starts the controller's channel manager
    * 3. Starts the replica state machine
    * 4. Starts the partition state machine
-   * If it encounters any unexpected exception/error while becoming controller, it resigns as the current controller.
+   * If it encounters(遭遇) any unexpected exception/error while becoming controller, it resigns(辞职) as the current controller.
    * This ensures another controller election will be triggered and there will always be an actively serving controller
    */
   private def onControllerFailover(): Unit = {
@@ -1547,7 +1562,7 @@ class KafkaController(val config: KafkaConfig,
   private def elect(): Unit = {
     activeControllerId = zkClient.getControllerId.getOrElse(-1)
     /*
-     * We can get here during the initial startup and the handleDeleted ZK callback. Because of the potential race condition,
+     * We can get here during the initial startup and the handleDeleted ZK callback. Because of the potential(潜在的) race condition,
      * it's possible that the controller has already been elected when we get here. This check will prevent the following
      * createEphemeralPath method from getting into an infinite loop if this broker is already the controller.
      */

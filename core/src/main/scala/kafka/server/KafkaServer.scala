@@ -102,6 +102,8 @@ object KafkaServer {
     clientConfig
   }
 
+  //EVICTION:驱逐
+  //INCREMENTAL:增量
   val MIN_INCREMENTAL_FETCH_SESSION_EVICTION_MS: Long = 120000
 }
 
@@ -124,8 +126,7 @@ class KafkaServer(
   private var shutdownLatch = new CountDownLatch(1)
   private var logContext: LogContext = _
 
-  private val kafkaMetricsReporters: Seq[KafkaMetricsReporter] =
-    KafkaMetricsReporter.startReporters(VerifiableProperties(config.originals))
+  private val kafkaMetricsReporters: Seq[KafkaMetricsReporter] = KafkaMetricsReporter.startReporters(VerifiableProperties(config.originals))
   var kafkaYammerMetrics: KafkaYammerMetrics = _
   var metrics: Metrics = _
 
@@ -227,8 +228,9 @@ class KafkaServer(
       if (canStartup) {
         _brokerState = BrokerState.STARTING
 
-        /* setup zookeeper */
+        /* setup zookeeper 初始化zk客户端，并创建部分顶层节点 */
         initZkClient(time)
+        // ZkConfigRepository我理解就是规范了获取配置的操作，而且提供了接口，可以进行外部扩展，而不仅仅是支持zk
         configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
 
         /* Get or create cluster_id */
@@ -237,14 +239,23 @@ class KafkaServer(
 
         /* load metadata */
         val initialMetaPropsEnsemble = {
+          // log.dirs=/tmp/kafka-logs
+          // metadata.log.dir=/tmp/kafka-logs-metadata
+          // migration.enabled=true
           val loader = new MetaPropertiesEnsemble.Loader()
           loader.addLogDirs(config.logDirs.asJava)
           if (config.migrationEnabled) {
             loader.addMetadataLogDir(config.metadataLogDir)
           }
+          /**
+           * 这里会逐个加载log.dirs和(zookeeper.metadata.migration.enable启用的情况下)metadata.log.dir中的meta.properties文件，对应三种情况：
+           *  无meta.properties文件放到emptyLogDirs
+           *  meta.properties文件解析失败放到errorLogDirs
+           *  有meta.properties文件Dirs并且解析成功的话，放到logDirProps，数据结构为Map：日志目录地址->MetaProperties
+           * 同时保留原数据目录：metadataLogDir
+           */
           loader.load()
         }
-
         val verificationId = if (config.brokerId < 0) {
           OptionalInt.empty()
         } else {
@@ -255,7 +266,9 @@ class KafkaServer(
         } else {
           util.EnumSet.of(REQUIRE_V0)
         }
+        //元数据内容的相关校验
         initialMetaPropsEnsemble.verify(Optional.of(_clusterId), verificationId, verificationFlags)
+
 
         /* generate brokerId */
         config._brokerId = getOrGenerateBrokerId(initialMetaPropsEnsemble)
@@ -263,11 +276,10 @@ class KafkaServer(
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
-        // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
-        // applied after ZkConfigManager starts.
+        // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be applied after ZkConfigManager starts.
         config.dynamicConfig.initialize(Some(zkClient), clientMetricsReceiverPluginOpt = None)
 
-        /* start scheduler */
+        /* start scheduler 这里初始化ScheduledThreadPoolExecutor 未执行任何任务 */
         kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
         kafkaScheduler.startup()
 
@@ -280,7 +292,18 @@ class KafkaServer(
         /* register broker metrics */
         _brokerTopicStats = new BrokerTopicStats(config.remoteLogManagerConfig.isRemoteStorageSystemEnabled())
 
+        /**
+         * fetch: ClientQuotaManager,
+         * produce: ClientQuotaManager,
+         * request: ClientRequestQuotaManager,
+         * controllerMutation: ControllerMutationQuotaManager,
+         * leader: ReplicationQuotaManager,
+         * follower: ReplicationQuotaManager,
+         * alterLogDirs: ReplicationQuotaManager,
+         * 创建7种配额管理器
+         */
         quotaManagers = QuotaFactory.instantiate(config, metrics, time, threadNamePrefix.getOrElse(""))
+        // 这个监听器可以做很多事情
         KafkaBroker.notifyClusterListeners(clusterId, kafkaMetricsReporters ++ metrics.reporters.asScala)
 
         logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
@@ -288,6 +311,7 @@ class KafkaServer(
         // Make sure all storage directories have meta.properties files.
         val metaPropsEnsemble = {
           val copier = new MetaPropertiesEnsemble.Copier(initialMetaPropsEnsemble)
+          //遍历的是emptyLogDirs和logDirProps也就是没有meta.properties文件和有meta.properties且解析成功的目录
           initialMetaPropsEnsemble.nonFailedDirectoryProps().forEachRemaining(e => {
             val logDir = e.getKey
             val builder = new MetaProperties.Builder(e.getValue).
@@ -308,6 +332,7 @@ class KafkaServer(
           copier.setWriteErrorHandler((logDir, e) => {
             logDirFailureChannel.maybeAddOfflineLogDir(logDir, s"Error while writing meta.properties to $logDir", e)
           })
+          //创建 or 更新 最新的meta.properties文件
           copier.writeLogDirChanges()
           copier.copy()
         }
@@ -324,6 +349,7 @@ class KafkaServer(
           logDirFailureChannel,
           config.usesTopicId)
         _brokerState = BrokerState.RECOVERY
+        // /brokers/topics 获取集群下的所有节点即集群下的所有主题
         logManager.startup(zkClient.getAllTopicsInCluster())
 
         remoteLogManagerOpt = createRemoteLogManager()
@@ -339,6 +365,7 @@ class KafkaServer(
         /* initialize feature change listener */
         _featureChangeListener = new FinalizedFeatureChangeListener(metadataCache, _zkClient)
         if (config.isFeatureVersioningSupported) {
+          //这里会更新 metadataCache，只允许执行一次，同时注册了zk节点变更处理器，zk状态处理器
           _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
         }
 
@@ -356,6 +383,7 @@ class KafkaServer(
           s"zk-broker-${config.nodeId}-",
           retryTimeoutMs = config.requestTimeoutMs.longValue
         )
+        //这里只是启动了线程 NodeToControllerRequestThread，还没开始发消息
         clientToControllerChannelManager.start()
 
         /* start forwarding manager */
@@ -376,7 +404,7 @@ class KafkaServer(
 
         // Create and start the socket server acceptor threads so that the bound port is known.
         // Delay starting processors until the end of the initialization sequence to ensure
-        // that credentials have been loaded before processing authentications.
+        // that credentials(证书) have been loaded before processing authentications.
         //
         // Note that we allow the use of KRaft mode controller APIs when forwarding is enabled
         // so that the Envelope request is exposed. This is only used in testing currently.
@@ -384,6 +412,7 @@ class KafkaServer(
 
         // Start alter partition manager based on the IBP version
         alterPartitionManager = if (config.interBrokerProtocolVersion.isAlterPartitionSupported) {
+          // 这里采用的仍然是 NodeToControllerChannelManagerImpl
           AlterPartitionManager(
             config = config,
             metadataCache = metadataCache,
@@ -395,11 +424,12 @@ class KafkaServer(
             brokerEpochSupplier = brokerEpochSupplier
           )
         } else {
+          // 这个会监控 isr 集合的变动，并将变动注册到zk 实现广播效果
           AlterPartitionManager(kafkaScheduler, time, zkClient)
         }
         alterPartitionManager.start()
 
-        // Start replica manager
+        // Start replica manager 这里涉及到ISR机制
         _replicaManager = createReplicaManager(isShuttingDown)
         replicaManager.startup()
 
@@ -410,8 +440,9 @@ class KafkaServer(
         tokenManager = new DelegationTokenManagerZk(config, tokenCache, time , zkClient)
         tokenManager.startup()
 
-        /* start kafka controller */
-        _kafkaController = new KafkaController(config, zkClient, time, metrics, brokerInfo, brokerEpoch, tokenManager, brokerFeatures, metadataCache, threadNamePrefix)
+        /* start kafka controller 这里有个事件管理器 会向Zookeeper注册个状态变更处理器*/
+        _kafkaController = new KafkaController(config, zkClient, time, metrics, brokerInfo, brokerEpoch,
+          tokenManager, brokerFeatures, metadataCache, threadNamePrefix)
         kafkaController.startup()
 
         if (config.migrationEnabled) {
@@ -509,6 +540,7 @@ class KafkaServer(
           Time.SYSTEM,
           metrics
         )
+        // 里边有诸多和组操作的相关操作
         groupCoordinator.startup(() => zkClient.getTopicPartitionCount(Topic.GROUP_METADATA_TOPIC_NAME).getOrElse(config.groupCoordinatorConfig.offsetsTopicPartitions))
 
         /* create producer ids manager */
@@ -527,6 +559,7 @@ class KafkaServer(
         transactionCoordinator = TransactionCoordinator(config, replicaManager, new KafkaScheduler(1, true, "transaction-log-manager-"),
           () => producerIdManager, metrics, metadataCache, Time.SYSTEM)
         transactionCoordinator.startup(
+          //  __transaction_state
           () => zkClient.getTopicPartitionCount(Topic.TRANSACTION_STATE_TOPIC_NAME).getOrElse(config.transactionTopicPartitions))
 
         /* start auto topic creation manager */
@@ -718,13 +751,13 @@ class KafkaServer(
 
   protected def createReplicaManager(isShuttingDown: AtomicBoolean): ReplicaManager = {
     val addPartitionsLogContext = new LogContext(s"[AddPartitionsToTxnManager broker=${config.brokerId}]")
-    val addPartitionsToTxnNetworkClient = NetworkUtils.buildNetworkClient("AddPartitionsManager", config, metrics, time, addPartitionsLogContext)
+    val addPartitionsToTxnNetworkClient = NetworkUtils.buildNetworkClient("AddPartitionsManager", config, metrics,
+      time, addPartitionsLogContext)
     val addPartitionsToTxnManager = new AddPartitionsToTxnManager(
       config,
       addPartitionsToTxnNetworkClient,
       metadataCache,
-      // The transaction coordinator is not created at this point so we must
-      // use a lambda here.
+      // The transaction coordinator is not created at this point so we must use a lambda here.
       transactionalId => transactionCoordinator.partitionFor(transactionalId),
       time
     )
@@ -752,6 +785,23 @@ class KafkaServer(
   private def initZkClient(time: Time): Unit = {
     info(s"Connecting to zookeeper on ${config.zkConnect}")
     _zkClient = KafkaZkClient.createZkClient("Kafka server", time, config, zkClientConfig)
+
+    /**
+     * /consumers
+     * /brokers/ids
+     * /brokers/topics
+     * /brokers/seqid
+     * /config/changes
+     * /config/topics
+     * /config/clients
+     * /config/users/
+     * /config/brokers
+     * /config/ips
+     * /admin/delete_topics
+     * /isr_change_notification
+     * /latest_producer_id_block
+     * /log_dir_event_notification
+     */
     _zkClient.createTopLevelPaths()
   }
 
@@ -1147,7 +1197,7 @@ class KafkaServer(
   /**
     * Return a sequence id generated by updating the broker sequence id path in ZK.
     * Users can provide brokerId in the config. To avoid conflicts between ZK generated
-    * sequence id and configured brokerId, we increment the generated sequence id by KafkaConfig.MaxReservedBrokerId.
+    * sequence id and configured brokerId, we increment the generated sequence id by KafkaConfig.MaxReservedBrokerId. reserved:保留的
     */
   private def generateBrokerId(): Int = {
     try {

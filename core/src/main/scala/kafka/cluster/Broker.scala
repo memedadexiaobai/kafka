@@ -118,4 +118,5 @@ case class Broker(id: Int, endPoints: Seq[EndPoint], rack: Option[String], featu
     Broker.ServerInfo(clusterResource, id, brokerEndpoints, interBrokerEndpoint,
       config.earlyStartListeners.map(_.value()).asJava)
   }
+
 }

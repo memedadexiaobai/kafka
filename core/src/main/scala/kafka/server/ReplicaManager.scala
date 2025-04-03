@@ -383,9 +383,12 @@ class ReplicaManager(val config: KafkaConfig,
 
   def startup(): Unit = {
     // start ISR expiration thread
-    // A follower can lag behind leader for up to config.replicaLagTimeMaxMs x 1.5 before it is removed from ISR
-    scheduler.schedule("isr-expiration", () => maybeShrinkIsr(), 0L, config.replicaLagTimeMaxMs / 2)
-    scheduler.schedule("shutdown-idle-replica-alter-log-dirs-thread", () => shutdownIdleReplicaAlterLogDirsThread(), 0L, 10000L)
+    // A follower can lag(滞后) behind leader for up to config.replicaLagTimeMaxMs x 1.5 before it is removed from ISR
+    // 追随者在从ISR中删除之前，可以落后于领导者高达config.replicaLagTimeMaxMs x 1.5
+    scheduler.schedule("isr-expiration",
+      () => maybeShrinkIsr(), 0L, config.replicaLagTimeMaxMs / 2)
+    scheduler.schedule("shutdown-idle-replica-alter-log-dirs-thread",
+      () => shutdownIdleReplicaAlterLogDirsThread(), 0L, 10000L)
 
     // If inter-broker protocol (IBP) < 1.0, the controller will send LeaderAndIsrRequest V0 which does not include isNew field.
     // In this case, the broker receiving the request cannot determine whether it is safe to create a partition if a log directory has failed.
@@ -2415,7 +2418,7 @@ class ReplicaManager(val config: KafkaConfig,
   private def maybeShrinkIsr(): Unit = {
     trace("Evaluating ISR list of partitions to see which replicas can be removed from the ISR")
 
-    // Shrink ISRs for non offline partitions
+    // Shrink(收缩) ISRs for non offline partitions
     allPartitions.keys.foreach { topicPartition =>
       onlinePartition(topicPartition).foreach(_.maybeShrinkIsr())
     }

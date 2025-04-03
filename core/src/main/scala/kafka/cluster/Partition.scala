@@ -51,16 +51,28 @@ import scala.collection.{Map, Seq}
 import scala.jdk.CollectionConverters._
 
 /**
+ * PartitionListener:侧重于分区自身的监听，在分区high watermark增加、分区发生异常(如分区下线)、分区删除时调用
+ * AlterPartitionListener：侧重于ISR层次的变更，标识ISR扩展、收缩、异常
+ * DelayedOperations：延迟操作的触发，key为：topic-partition，维度有DelayedProduce、DelayedFetch、DelayedDeleteRecords
+ * AssignmentState：分配状态，记录副本的分配，子类有OngoingReassignmentState：正在进行的重新分配状态、SimpleAssignmentState
+ * PartitionState：记录ISR数据、领导者恢复状态、标识是否有AlterPartition请求
+ *  CommittedPartitionState：已提交的PartitionState
+ *  PendingPartitionChange：加入AlterPartitionListener，默认标识领导者恢复状态为已恢复 pending:待定的
+ *    PendingExpandIsr：标识ISR扩展
+ *    PendingShrinkIsr：标识ISR收缩
+ */
+
+/**
  * Listener receives notification from an Online Partition.
  *
  * A listener can be (re-)registered to an Online partition only. The listener
  * is notified as long as the partition remains Online. When the partition fails
- * or is deleted, respectively `onFailed` or `onDeleted` are called once. No further
+ * or is deleted, respectively(分别) `onFailed` or `onDeleted` are called once. No further
  * notifications are sent after this point on.
  *
  * Note that the callbacks are executed in the thread that triggers the change
- * AND that locks may be held during their execution. They are meant to be used
- * as notification mechanism only.
+ * AND that locks may be held(使保持)during their execution.
+ * They are meant to be used as notification mechanism only.
  */
 trait PartitionListener {
   /**
@@ -75,14 +87,14 @@ trait PartitionListener {
 
   /**
    * Called when the Partition (or replica) on this broker is deleted. Note that it does not mean
-   * that the partition was deleted but only that this broker does not host a replica of it any more.
+   * that the partition was deleted but only that this broker does not host(托管，主办，主持) a replica of it any more.
    */
   def onDeleted(partition: TopicPartition): Unit = {}
 }
 
 trait AlterPartitionListener {
   def markIsrExpand(): Unit
-  def markIsrShrink(): Unit
+  def markIsrShrink(): Unit //shrink:收缩
   def markFailed(): Unit
 }
 
@@ -168,6 +180,7 @@ sealed trait AssignmentState {
   def isAddingReplica(brokerId: Int): Boolean = false
 }
 
+//正在进行的重新分配状态
 case class OngoingReassignmentState(addingReplicas: Seq[Int],
                                     removingReplicas: Seq[Int],
                                     replicas: Seq[Int]) extends AssignmentState {
@@ -1281,6 +1294,7 @@ class Partition(val topicPartition: TopicPartition,
   }
 
   private def needsShrinkIsr(): Boolean = {
+    //选择leader的log
     leaderLogIfLocal.exists { _ => getOutOfSyncReplicas(replicaLagTimeMaxMs).nonEmpty }
   }
 
@@ -1296,7 +1310,7 @@ class Partition(val topicPartition: TopicPartition,
   /**
    * If the follower already has the same leo as the leader, it will not be considered as out-of-sync,
    * otherwise there are two cases that will be handled here -
-   * 1. Stuck followers: If the leo of the replica hasn't been updated for maxLagMs ms,
+   * 1. Stuck(卡住) followers: If the leo of the replica hasn't been updated for maxLagMs ms,
    *                     the follower is stuck and should be removed from the ISR
    * 2. Slow followers: If the replica has not read up to the leo within the last maxLagMs ms,
    *                    then the follower is lagging and should be removed from the ISR
@@ -1304,7 +1318,9 @@ class Partition(val topicPartition: TopicPartition,
    * the last time when the replica was fully caught up. If either of the above conditions
    * is violated, that replica is considered to be out of sync
    *
-   * If an ISR update is in-flight, we will return an empty set here
+   * If an ISR update is in-flight(正在进行中), we will return an empty set here
+   *
+   * 判断标准：一个是副本的LEO没跟上Leader的LEO 一个是心跳检测，超时没检测到
    **/
   def getOutOfSyncReplicas(maxLagMs: Long): Set[Int] = {
     val current = partitionState
@@ -1793,8 +1809,8 @@ class Partition(val topicPartition: TopicPartition,
     currentState: CommittedPartitionState,
     outOfSyncReplicaIds: Set[Int]
   ): PendingShrinkIsr = {
-    // When shrinking the ISR, we cannot assume that the update will succeed as this could
-    // erroneously advance the HW if the `AlterPartition` were to fail. Hence the "maximal ISR"
+    // When shrinking the ISR, we cannot assume(假定) that the update will succeed as this could
+    // erroneously(错误的) advance the HW if the `AlterPartition` were to fail. Hence(因此) the "maximal ISR"
     // for `PendingShrinkIsr` is the the current ISR.
     val isrToSend = partitionState.isr -- outOfSyncReplicaIds
     val isrWithBrokerEpoch = addBrokerEpochToIsr(isrToSend.toList)

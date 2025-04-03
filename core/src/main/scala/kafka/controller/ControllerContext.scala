@@ -73,6 +73,10 @@ case class ReplicaAssignment private (replicas: Seq[Int],
     s"removingReplicas=${removingReplicas.mkString(",")})"
 }
 
+/**
+ * 这里包含了集群内部关于broker、topic、partition、replica的信息和相关操作
+ * 我理解更偏向于内部信息的一个缓存
+ */
 class ControllerContext extends ControllerChannelContext {
   val stats = new ControllerStats
   var offlinePartitionCount = 0

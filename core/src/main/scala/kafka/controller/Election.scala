@@ -23,6 +23,9 @@ import scala.collection.Seq
 
 case class ElectionResult(topicPartition: TopicPartition, leaderAndIsr: Option[LeaderAndIsr], liveReplicas: Seq[Int])
 
+/**
+ * leader节点可能会发生的所有变动对应的方法
+ */
 object Election {
 
   private def leaderForOffline(partition: TopicPartition,

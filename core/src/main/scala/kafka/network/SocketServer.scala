@@ -73,6 +73,9 @@ import scala.util.control.ControlThrowable
  *      1 Acceptor thread that handles new connections
  *      Acceptor has 1 Processor thread that has its own selector and read requests from the socket.
  *      1 Handler thread that handles requests and produces responses back to the processor thread for writing.
+ *
+ * 我理解SocketServer只负责连接，具体的处理在Processor，分成2个平面:控制平面处理器处理controller请求，数据平面处理器处理其他客户端请求
+ * ConnectionQuotas:用来做整体的请求连接的调整
  */
 class SocketServer(val config: KafkaConfig,
                    val metrics: Metrics,
@@ -890,8 +893,8 @@ private[kafka] object Processor {
 }
 
 /**
- * Thread that processes all requests from a single connection. There are N of these running in parallel
- * each of which has its own selector
+ * Thread that processes all requests from a single connection.
+ * There are N of these running in parallel each of which has its own selector
  *
  * @param isPrivilegedListener The privileged listener flag is used as one factor to determine whether
  *                             a certain request is forwarded or not. When the control plane is defined,

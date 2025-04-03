@@ -36,21 +36,21 @@ private object MemberMetadata {
  * Member metadata contains the following metadata:
  *
  * Heartbeat metadata:
- * 1. negotiated heartbeat session timeout
+ * 1. negotiated(协商) heartbeat session timeout
  * 2. timestamp of the latest heartbeat
  *
  * Protocol metadata:
  * 1. the list of supported protocols (ordered by preference)
  * 2. the metadata associated with each protocol
  *
- * In addition, it also contains the following state information:
+ * In addition(此外), it also contains the following state information:
  *
  * 1. Awaiting rebalance callback: when the group is in the prepare-rebalance state,
  *                                 its rebalance callback will be kept in the metadata if the
  *                                 member has sent the join group request
  * 2. Awaiting sync callback: when the group is in the awaiting-sync state, its sync callback
  *                            is kept in metadata until the leader provides the group assignment
- *                            and the group transitions to stable
+ *                            and the group transitions(过渡) to stable(稳固的)
  */
 @nonthreadsafe
 private[group] class MemberMetadata(var memberId: String,

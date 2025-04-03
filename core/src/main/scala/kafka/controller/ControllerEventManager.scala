@@ -37,6 +37,16 @@ object ControllerEventManager {
   private val EventQueueSizeMetricName = "EventQueueSize"
 }
 
+/**
+ * 一个常规的事件处理机制代码：
+ * ControllerEvent：需要处理的事件
+ * QueuedEvent：封装了ControllerEvent，增加了事件的失效判断机制、事件开始执行的判断机制
+ * ControllerEventProcessor：ControllerEvent事件处理器
+ * ControllerEventManager：ControllerEvent管理器
+ *  queue：封装待处理的实际集合，此处为QueuedEvent
+ *  ControllerEventThread：事件处理器线程，从queue读取待处理的事件，此处为QueuedEvent
+ */
+
 trait ControllerEventProcessor {
   def process(event: ControllerEvent): Unit
   def preempt(event: ControllerEvent): Unit
@@ -45,15 +55,17 @@ trait ControllerEventProcessor {
 class QueuedEvent(val event: ControllerEvent,
                   val enqueueTimeMs: Long) {
   private val processingStarted = new CountDownLatch(1)
-  private val spent = new AtomicBoolean(false)
+  private val spent = new AtomicBoolean(false) //spent:失效的
 
   def process(processor: ControllerEventProcessor): Unit = {
+    //先标识失效，
     if (spent.getAndSet(true))
       return
     processingStarted.countDown()
     processor.process(event)
   }
 
+  //preempt：抢占
   def preempt(processor: ControllerEventProcessor): Unit = {
     if (spent.getAndSet(true))
       return

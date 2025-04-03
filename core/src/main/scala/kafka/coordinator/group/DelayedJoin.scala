@@ -24,7 +24,7 @@ import scala.math.{max, min}
 /**
  * Delayed rebalance operations that are added to the purgatory when group is preparing for rebalance
  *
- * Whenever a join-group request is received, check if all known group members have requested
+ * Whenever(每当) a join-group request is received, check if all known group members have requested
  * to re-join the group; if yes, complete this operation to proceed rebalance.
  *
  * When the operation has expired, any known members that have not requested to re-join

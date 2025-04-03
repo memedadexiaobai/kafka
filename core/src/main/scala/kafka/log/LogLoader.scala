@@ -74,8 +74,8 @@ class LogLoader(
 
   /**
    * Load the log segments from the log files on disk, and returns the components of the loaded log.
-   * Additionally, it also suitably updates the provided LeaderEpochFileCache and ProducerStateManager
-   * to reflect the contents of the loaded log.
+   * Additionally(另外), it also suitably(适当的) updates the provided LeaderEpochFileCache and ProducerStateManager
+   * to reflect(反映) the contents of the loaded log.
    *
    * In the context of the calling thread, this function does not need to convert IOException to
    * KafkaStorageException because it is only called before all logs are loaded.
@@ -88,15 +88,18 @@ class LogLoader(
   def load(): LoadedLogOffsets = {
     // First pass: through the files in the log directory and remove any temporary files
     // and find any interrupted swap operations
+    //1.找到所有.clean中的最小偏移量，删除所有小于该最小偏移量的.swap文件
+    //2.删除所有.clean文件
+    //3.返回所有大于最小偏移量的.swap文件
     val swapFiles = removeTempFilesAndCollectSwapFiles()
 
-    // The remaining valid swap files must come from compaction or segment split operation. We can
-    // simply rename them to regular segment files. But, before renaming, we should figure out which
-    // segments are compacted/split and delete these segment files: this is done by calculating
-    // min/maxSwapFileOffset.
+    // The remaining(剩下的) valid swap files must come from compaction(压缩，压实) or segment split operation.
+    // We can simply rename them to regular segment files. But, before renaming, we should figure out(解决，算出) which
+    // segments are compacted/split and delete these segment files: this is done by calculating min/maxSwapFileOffset.
     // We store segments that require renaming in this code block, and do the actual renaming later.
     var minSwapFileOffset = Long.MaxValue
     var maxSwapFileOffset = Long.MinValue
+
     swapFiles.filter(f => UnifiedLog.isLogFile(new File(Utils.replaceSuffix(f.getPath, SwapFileSuffix, "")))).foreach { f =>
       val baseOffset = offsetFromFile(f)
       val segment = LogSegment.open(f.getParentFile,
@@ -112,8 +115,8 @@ class LogLoader(
       maxSwapFileOffset = Math.max(segment.readNextOffset, maxSwapFileOffset)
     }
 
-    // Second pass: delete segments that are between minSwapFileOffset and maxSwapFileOffset. As
-    // discussed above, these segments were compacted or split but haven't been renamed to .delete
+    // Second pass: delete segments that are between minSwapFileOffset and maxSwapFileOffset.
+    // As discussed above, these segments were compacted or split but haven't been renamed to .delete
     // before shutting down the broker.
     for (file <- dir.listFiles if file.isFile) {
       try {
@@ -140,7 +143,7 @@ class LogLoader(
     }
 
     // Fourth pass: load all the log and index files.
-    // We might encounter legacy log segments with offset overflow (KAFKA-6264). We need to split such segments. When
+    // We might encounter(遭遇，遇到) legacy(遗留的) log segments with offset overflow (KAFKA-6264). We need to split such segments. When
     // this happens, restart loading segment files from scratch.
     retryOnOffsetOverflow(() => {
       // In case we encounter a segment with offset overflow, the retry logic will split it after which we need to retry
@@ -242,13 +245,15 @@ class LogLoader(
     // KAFKA-6264: Delete all .swap files whose base offset is greater than the minimum .cleaned segment offset. Such .swap
     // files could be part of an incomplete split operation that could not complete. See Log#splitOverflowedSegment
     // for more details about the split operation.
+    //所有找到 .clean 文件中的最小的偏移量，这些是需要被清理的文件，小于这个最小偏移量的文件是应该被删除的，swapFiles.partition分出小于和大于最小偏移量的
+    //删除小于最小偏移量的.swap文件，大于等于的保留属于有效.swap文件
     val (invalidSwapFiles, validSwapFiles) = swapFiles.partition(file => offsetFromFile(file) >= minCleanedFileOffset)
     invalidSwapFiles.foreach { file =>
       debug(s"Deleting invalid swap file ${file.getAbsoluteFile} minCleanedFileOffset: $minCleanedFileOffset")
       Files.deleteIfExists(file.toPath)
     }
 
-    // Now that we have deleted all .swap files that constitute an incomplete split operation, let's delete all .clean files
+    // Now that we have deleted all .swap files that constitute(组成，构成) an incomplete(不完整的) split operation, let's delete all .clean files
     cleanedFiles.foreach { file =>
       debug(s"Deleting stray .clean file ${file.getAbsolutePath}")
       Files.deleteIfExists(file.toPath)
@@ -300,8 +305,7 @@ class LogLoader(
    * @throws LogSegmentOffsetOverflowException if the log directory contains a segment with messages that overflow the index offset
    */
   private def loadSegmentFiles(): Unit = {
-    // load segments in ascending order because transactional data from one segment may depend on the
-    // segments that come before it
+    // load segments in ascending order because transactional data from one segment may depend on the come before itsegments that
     for (file <- dir.listFiles.sortBy(_.getName) if file.isFile) {
       if (isIndexFile(file)) {
         // if it is an index file, make sure it has a corresponding .log file

@@ -41,7 +41,7 @@ object ZkAlterPartitionManager {
   // This field is mutable to allow overriding change notification behavior in test cases
   @volatile var DefaultIsrPropagationConfig: IsrChangePropagationConfig = IsrChangePropagationConfig(
     checkIntervalMs = 2500,
-    lingerMs = 5000,
+    lingerMs = 5000, //linger:徘徊；逗留；流连；苟延残喘；磨蹭
     maxDelayMs = 60000,
   )
 }
@@ -52,11 +52,11 @@ class ZkAlterPartitionManager(scheduler: Scheduler, time: Time, zkClient: KafkaZ
   // Visible for testing
   private[server] val isrChangeSet: mutable.Set[TopicPartition] = new mutable.HashSet[TopicPartition]()
   private val lastIsrChangeMs = new AtomicLong(time.milliseconds())
-  private val lastIsrPropagationMs = new AtomicLong(time.milliseconds())
+  private val lastIsrPropagationMs = new AtomicLong(time.milliseconds()) //Propagation:传播
 
   override def start(): Unit = {
-    scheduler.schedule("isr-change-propagation", () => maybePropagateIsrChanges(), 0L,
-      isrChangeNotificationConfig.checkIntervalMs)
+    //ZK的需要定时去检查ISR变化
+    scheduler.schedule("isr-change-propagation", () => maybePropagateIsrChanges(), 0L, isrChangeNotificationConfig.checkIntervalMs)
   }
 
   override def submit(
@@ -93,19 +93,21 @@ class ZkAlterPartitionManager(scheduler: Scheduler, time: Time, zkClient: KafkaZ
    * This function periodically runs to see if ISR needs to be propagated. It propagates ISR when:
    * 1. There is ISR change not propagated yet.
    * 2. There is no ISR Change in the last five seconds, or it has been more than 60 seconds since the last ISR propagation.
-   * This allows an occasional ISR change to be propagated within a few seconds, and avoids overwhelming controller and
+   * This allows an occasional(偶尔的) ISR change to be propagated within a few seconds, and avoids overwhelming(巨大的，压倒性的) controller and
    * other brokers when large amount of ISR change occurs.
    */
   private[server] def maybePropagateIsrChanges(): Unit = {
     val now = time.milliseconds()
     isrChangeSet synchronized {
       if (isrChangeSet.nonEmpty &&
-        (lastIsrChangeMs.get() + isrChangeNotificationConfig.lingerMs < now ||
-          lastIsrPropagationMs.get() + isrChangeNotificationConfig.maxDelayMs < now)) {
+        (lastIsrChangeMs.get() + isrChangeNotificationConfig.lingerMs < now
+          || lastIsrPropagationMs.get() + isrChangeNotificationConfig.maxDelayMs < now)) {
+        //通过 /isr_change_notification 来发布ISR变化
         zkClient.propagateIsrChanges(isrChangeSet)
         isrChangeSet.clear()
         lastIsrPropagationMs.set(now)
       }
     }
   }
+
 }

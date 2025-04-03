@@ -26,6 +26,16 @@ import org.apache.kafka.server.common.MetadataVersion
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 
+/**
+ * This class is used to send requests to the brokers to propagate() the migration(迁移) state.
+ *
+ * @param config Kafka config present in the controller.
+ * @param metadataProvider Provider to provide the relevant metadata to build the state needed to send RPCs
+ * @param metadataVersionProvider Provider to provide the metadata version used by the controller.
+ * @param controllerChannelManager
+ * @param stateChangeLogger logger to log the various events while sending requests and receiving responses from the brokers
+ *
+ */
 sealed class MigrationPropagatorBatch(
   config: KafkaConfig,
   metadataProvider: () => ControllerChannelContext,

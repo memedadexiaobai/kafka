@@ -51,7 +51,7 @@ trait OffsetCheckpoint {
 }
 
 /**
- * This class persists a map of (Partition => Offsets) to a file (for a certain replica)
+ * This class persists(保持) a map of (Partition => Offsets) to a file (for a certain replica)
  *
  * The format in the offset checkpoint file is like this:
  *  -----checkpoint file begin------
@@ -74,6 +74,14 @@ class OffsetCheckpointFile(val file: File, logDirFailureChannel: LogDirFailureCh
   def read(): Map[TopicPartition, Long] = {
     val list = checkpoint.read()
     val result = mutable.Map.empty[TopicPartition, Long]
+    /**
+     * Scala 中，mutable.Map 的 sizeHint 方法用于预先告知集合预计的大小。调用 sizeHint 可以帮助集合在内部优化其容量，从而提高性能，特别是在大量元素插入的情况下。
+     * 作用
+     *  1.性能优化：通过调用 sizeHint，集合可以预先分配足够的内部存储空间，避免在插入过程中频繁地重新分配和扩容。这可以显著减少内存分配和复制的开销，提高插入操作的效率。
+     *  2.减少内存碎片：预先分配足够的空间可以减少内存碎片，因为集合不会频繁地进行小规模的扩容操作，而是直接使用预分配的空间。
+     *  3.初始化成本：虽然 sizeHint 本身有一定的初始化成本，但在大量元素插入的情况下，这种成本是可以忽略不计的，而带来的性能提升则是显著的。
+     * 调用 sizeHint 是一种优化手段，特别是在处理大量数据时，可以显著提高集合的性能。通过预先告知集合的预期大小，可以减少内存分配和复制的开销，提高插入操作的效率。
+     */
     result.sizeHint(list.size())
     list.forEach { case (tp, offset) => result(tp) = offset }
     result

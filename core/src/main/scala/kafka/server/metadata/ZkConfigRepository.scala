@@ -39,8 +39,7 @@ class ZkConfigRepository(adminZkClient: AdminZkClient) extends ConfigRepository 
       case tpe => throw new IllegalArgumentException(s"Unsupported config type: $tpe")
     }
     // ZK stores cluster configs under "<default>".
-    val effectiveName = if (configResource.`type`.equals(Type.BROKER) &&
-        configResource.name.isEmpty) {
+    val effectiveName = if (configResource.`type`.equals(Type.BROKER) && configResource.name.isEmpty) {
       ZooKeeperInternals.DEFAULT_STRING
     } else {
       configResource.name

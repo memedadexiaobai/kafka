@@ -58,7 +58,7 @@ case class SuccessfulRegistrationResult(zkControllerEpoch: Int, controllerEpochZ
  * Implementation note: this class includes methods for various components (Controller, Configs, Old Consumer, etc.)
  * and returns instances of classes from the calling packages in some cases. This is not ideal, but it made it
  * easier to migrate away from `ZkUtils` (since removed). We should revisit this. We should also consider whether a
- * monolithic [[kafka.zk.ZkData]] is the way to go.
+ * monolithic(单一的) [[kafka.zk.ZkData]] is the way to go.
  */
 class KafkaZkClient private[zk] (
   zooKeeperClient: ZooKeeperClient,
@@ -108,7 +108,7 @@ class KafkaZkClient private[zk] (
     */
   def registerBroker(brokerInfo: BrokerInfo): Long = {
     val path = brokerInfo.path
-    val stat = checkedEphemeralCreate(path, brokerInfo.toJsonBytes)
+    val stat = checkedEphemeralCreate(path, brokerInfo.toJsonBytes) //Ephemeral：临时的
     info(s"Registered broker ${brokerInfo.broker.id} at path $path with addresses: " +
       s"${brokerInfo.broker.endPoints.map(_.connectionString).mkString(",")}, czxid (broker epoch): ${stat.getCzxid}")
     stat.getCzxid
@@ -138,7 +138,7 @@ class KafkaZkClient private[zk] (
     def checkControllerAndEpoch(): (Int, Int) = {
       val curControllerId = getControllerId.getOrElse(throw new ControllerMovedException(
         s"The ephemeral node at ${ControllerZNode.path} went away while checking whether the controller election succeeds. " +
-          s"Aborting controller startup procedure"))
+          s"Aborting controller startup procedure(程序)"))
       if (controllerId == curControllerId) {
         val (epoch, stat) = getControllerEpoch.getOrElse(
           throw new IllegalStateException(s"${ControllerEpochZNode.path} existed before but goes away while trying to read it"))
@@ -569,8 +569,8 @@ class KafkaZkClient private[zk] (
    * @return sequence of brokers in the cluster.
    */
   def getAllBrokersInCluster: Seq[Broker] = {
-    val brokerIds = getSortedBrokerList
-    val getDataRequests = brokerIds.map(brokerId => GetDataRequest(BrokerIdZNode.path(brokerId), ctx = Some(brokerId)))
+    val brokerIds = getSortedBrokerList //获取/brokers/ids下的所有节点
+    val getDataRequests = brokerIds.map(brokerId => GetDataRequest(BrokerIdZNode.path(brokerId), ctx = Some(brokerId))) // /brokers/ids/节点id
     val getDataResponses = retryRequestsUntilConnected(getDataRequests)
     getDataResponses.flatMap { getDataResponse =>
       val brokerId = getDataResponse.ctx.get.asInstanceOf[Int]
@@ -2298,6 +2298,7 @@ object KafkaZkClient {
       zkClientConfig.setProperty(ZKConfig.JUTE_MAXBUFFER, (4096 * 1024).toString)
 
     if (createChrootIfNecessary) {
+      //针对指定节点下的处理，比如localhost:2181/kafka 这种的先建立zk连接，然后创建chroot节点
       val chrootIndex = connectString.indexOf("/")
       if (chrootIndex > 0) {
         val zkConnWithoutChrootForChrootCreation = connectString.substring(0, chrootIndex)
@@ -2395,6 +2396,7 @@ object KafkaZkClient {
 
   def createZkClient(name: String, time: Time, config: KafkaConfig, zkClientConfig: ZKClientConfig): KafkaZkClient = {
     val secureAclsEnabled = config.zkEnableSecureAcls
+    //jdk环境变量设置 or 配置文件配置
     val isZkSecurityEnabled = JaasUtils.isZkSaslEnabled || KafkaConfig.zkTlsClientAuthEnabled(zkClientConfig)
 
     if (secureAclsEnabled && !isZkSecurityEnabled)

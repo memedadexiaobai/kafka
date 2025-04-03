@@ -52,6 +52,7 @@ class ControllerDeletionClient(controller: KafkaController, zkClient: KafkaZkCli
 }
 
 /**
+ * 主题的删除是有个过程的，这里主管整个过程的处理
  * This manages the state machine for topic deletion.
  * 1. TopicCommand issues topic deletion by creating a new admin path /admin/delete_topics/<topic>
  * 2. The controller listens for child changes on /admin/delete_topic and starts topic deletion for the respective topics

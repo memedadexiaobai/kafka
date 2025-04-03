@@ -180,7 +180,7 @@ private[transaction] object TransactionMetadata {
   def isEpochExhausted(producerEpoch: Short): Boolean = producerEpoch >= Short.MaxValue - 1
 }
 
-// this is a immutable object representing the target transition of the transaction metadata
+// this is a immutable object representing the target transition(转换) of the transaction metadata
 private[transaction] case class TxnTransitMetadata(producerId: Long,
                                                    lastProducerId: Long,
                                                    producerEpoch: Short,
@@ -228,13 +228,13 @@ private[transaction] class TransactionMetadata(val transactionalId: String,
                                                @volatile var txnStartTimestamp: Long = -1,
                                                @volatile var txnLastUpdateTimestamp: Long) extends Logging {
 
-  // pending state is used to indicate the state that this transaction is going to
-  // transit to, and for blocking future attempts to transit it again if it is not legal;
+  // pending state is used to indicate the state that this transaction is going to transit(通过) to
+  // and for blocking future attempts to transit it again if it is not legal;
   // initialized as the same as the current state
   var pendingState: Option[TransactionState] = None
 
-  // Indicates that during a previous attempt to fence a producer, the bumped epoch may not have been
-  // successfully written to the log. If this is true, we will not bump the epoch again when fencing
+  // Indicates that during a previous attempt to fence(隔离) a producer, the bumped(碰上) epoch may not have been
+  // successfully written to the log. If this is true, we will not bump the epoch again(再一次) when fencing
   var hasFailedEpochFence: Boolean = false
 
   private[transaction] val lock = new ReentrantLock
@@ -383,8 +383,7 @@ private[transaction] class TransactionMetadata(val transactionalId: String,
       throw new IllegalArgumentException(s"Illegal new producer id $newProducerId")
 
     // The epoch is initialized to NO_PRODUCER_EPOCH when the TransactionMetadata
-    // is created for the first time and it could stay like this until transitioning
-    // to Dead.
+    // is created for the first time and it could stay like this until transitioning to Dead.
     if (newState != Dead && newEpoch < 0)
       throw new IllegalArgumentException(s"Illegal new producer epoch $newEpoch")
 

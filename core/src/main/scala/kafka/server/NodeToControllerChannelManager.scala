@@ -120,11 +120,11 @@ class RaftControllerNodeProvider(
 }
 
 /**
- * This class manages the connection between a broker and the controller. It runs a single
- * [[NodeToControllerRequestThread]] which uses the broker's metadata cache as its own metadata to find
+ * This class manages the connection between a broker and the controller.
+ * It runs a single [[NodeToControllerRequestThread]] which uses the broker's metadata cache as its own metadata to find
  * and connect to the controller. The channel is async and runs the network connection in the background.
- * The maximum number of in-flight requests are set to one to ensure orderly response from the controller, therefore
- * care must be taken to not block on outstanding requests for too long.
+ * The maximum number of in-flight requests are set to one to ensure orderly response from the controller,
+ * therefore care must be taken to not block on outstanding requests for too long. 因此，必须注意不要长时间阻止未完成的请求。
  */
 class NodeToControllerChannelManagerImpl(
   controllerNodeProvider: ControllerNodeProvider,
@@ -150,6 +150,7 @@ class NodeToControllerChannelManagerImpl(
   }
 
   private[server] def newRequestThread = {
+
     def buildNetworkClient(controllerInfo: ControllerInformation) = {
       val channelBuilder = ChannelBuilders.clientChannelBuilder(
         controllerInfo.securityProtocol,
@@ -198,6 +199,7 @@ class NodeToControllerChannelManagerImpl(
     val threadName = s"${threadNamePrefix}to-controller-${channelName}-channel-manager"
 
     val controllerInformation = controllerNodeProvider.getControllerInfo()
+
     new NodeToControllerRequestThread(
       buildNetworkClient(controllerInformation),
       controllerInformation.isZkController,
@@ -399,4 +401,5 @@ class NodeToControllerRequestThread(
     super.start()
     started = true
   }
+
 }
