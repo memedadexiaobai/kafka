@@ -44,7 +44,7 @@ import java.util.Optional;
  * entry-as-string-on-each-line
  * ========= File end ===============
  * </pre>
- * Each entry is represented as a string on each line in the checkpoint file. {@link EntryFormatter} is used
+ * Each entry is represented(代表) as a string on each line in the checkpoint file. {@link EntryFormatter} is used
  * to convert the entry into a string and vice versa.
  *
  * @param <T> entry type.
@@ -79,8 +79,13 @@ public class CheckpointFile<T> {
                  BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(fileOutputStream, StandardCharsets.UTF_8))) {
                 CheckpointWriteBuffer<T> checkpointWriteBuffer = new CheckpointWriteBuffer<>(writer, version, formatter);
                 checkpointWriteBuffer.write(entries);
-                writer.flush();
-                fileOutputStream.getFD().sync();
+                //flush 方法将缓冲区中的数据写入到文件输出流中，但这些数据仍然可能停留在操作系统的缓存中，而没有被写入到磁盘。
+                // flush 方法的主要作用是清空缓冲区，确保所有数据都被传递给底层的文件输出流
+                writer.flush(); //flush 操作将数据从应用层的缓冲区写入到操作系统的缓存中。
+                //sync 操作将操作系统的缓存中的数据写入到持久化存储设备中，确保数据的安全性和一致性。
+                //sync 方法强制将文件描述符关联的所有缓冲区中的数据写入到持久化存储设备中。这类似于 FileChannel.force(true) 方法的作用，
+                // 确保数据和元数据都被写入到磁盘，从而提高数据的安全性和一致性
+                fileOutputStream.getFD().sync(); //强制磁盘同步
             }
 
             Utils.atomicMoveWithFallback(tempPath, absolutePath);
@@ -192,7 +197,7 @@ public class CheckpointFile<T> {
     }
 
     /**
-     * This is used to convert the given entry of type {@code T} into a string and vice versa.
+     * This is used to convert the given entry of type {@code T} into a string and vice versa(词组，反之亦然).
      *
      * @param <T> entry type
      */
@@ -211,4 +216,5 @@ public class CheckpointFile<T> {
          */
         Optional<T> fromString(String value);
     }
+
 }

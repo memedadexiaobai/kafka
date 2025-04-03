@@ -31,7 +31,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * (i.e. memory mapping) the underlying index until it is accessed for the first time via the
  * `get` method.
  *
- * In addition, this class exposes a number of methods (e.g. updateParentDir, renameTo, close,
+ * In addition, this class exposes(暴露) a number of methods (e.g. updateParentDir, renameTo, close,
  * etc.) that provide the desired behavior without causing the index to be loaded. If the index
  * had previously been loaded, the methods in this class simply delegate to the relevant method in
  * the index.

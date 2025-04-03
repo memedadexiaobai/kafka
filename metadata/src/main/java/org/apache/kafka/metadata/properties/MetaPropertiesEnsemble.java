@@ -358,8 +358,7 @@ public final class MetaPropertiesEnsemble {
                 String metaPropsPath = new File(logDir, META_PROPERTIES_NAME).getAbsolutePath();
                 try {
                     preWriteHandler.handle(logDir, newSet.contains(logDir), metaProps);
-                    PropertiesUtils.writePropertiesFile(metaProps.toProperties(),
-                        metaPropsPath, true);
+                    PropertiesUtils.writePropertiesFile(metaProps.toProperties(), metaPropsPath, true);
                 } catch (IOException e) {
                     errorLogDirs.add(logDir);
                     logDirProps.remove(logDir);
@@ -420,8 +419,7 @@ public final class MetaPropertiesEnsemble {
     public Iterator<Entry<String, Optional<MetaProperties>>> nonFailedDirectoryProps() {
         return new Iterator<Entry<String, Optional<MetaProperties>>>() {
             private final Iterator<String> emptyLogDirsIterator = emptyLogDirs.iterator();
-            private final Iterator<Entry<String, MetaProperties>> logDirsIterator =
-                    logDirProps.entrySet().iterator();
+            private final Iterator<Entry<String, MetaProperties>> logDirsIterator = logDirProps.entrySet().iterator();
 
             @Override
             public boolean hasNext() {

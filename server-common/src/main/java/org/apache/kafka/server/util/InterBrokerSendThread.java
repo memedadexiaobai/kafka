@@ -104,6 +104,7 @@ public abstract class InterBrokerSendThread extends ShutdownableThread {
 
     protected void pollOnce(long maxTimeoutMs) {
         try {
+            // 生成请求全部放入 UnsentRequests
             drainGeneratedRequests();
             long now = time.milliseconds();
             final long timeout = sendRequests(now, maxTimeoutMs);
@@ -140,6 +141,7 @@ public abstract class InterBrokerSendThread extends ShutdownableThread {
     private long sendRequests(long now, long maxTimeoutMs) {
         long pollTimeout = maxTimeoutMs;
         for (Node node : unsentRequests.nodes()) {
+            // 获取 node 节点上的全部请求
             final Iterator<ClientRequest> requestIterator = unsentRequests.requestIterator(node);
             while (requestIterator.hasNext()) {
                 final ClientRequest request = requestIterator.next();

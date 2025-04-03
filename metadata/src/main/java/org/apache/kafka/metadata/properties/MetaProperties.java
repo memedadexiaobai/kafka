@@ -101,8 +101,7 @@ public final class MetaProperties {
 
         public Builder(Properties props) {
             this.version = MetaPropertiesVersion.fromNumberString(
-                props.getProperty(VERSION_PROP,
-                    MetaPropertiesVersion.V0.numberString()));
+                props.getProperty(VERSION_PROP, MetaPropertiesVersion.V0.numberString()));
             if (version.hasBrokerId()) {
                 if (props.containsKey(BROKER_ID_PROP)) {
                     this.nodeId = OptionalInt.of(PropertiesUtils.loadRequiredIntProp(props, BROKER_ID_PROP));

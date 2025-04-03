@@ -59,8 +59,8 @@ import java.util.stream.Stream;
  * epoch, sequence number, last offset, etc.)
  * <p>
  * The sequence number is the last number successfully appended to the partition for the given identifier.
- * The epoch is used for fencing against zombie writers. The offset is the one of the last successful message
- * appended to the partition.
+ * The epoch is used for fencing(隔开) against zombie writers.
+ * The offset is the one of the last successful message appended to the partition.
  * <p>
  * As long as a producer id is contained in the map, the corresponding producer can continue to write data.
  * However, producer ids can be expired due to lack of recent use or if the last written entry has been deleted from

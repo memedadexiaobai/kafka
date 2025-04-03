@@ -61,7 +61,7 @@ public class DirectoryId {
 
     /**
      * Check if a directory ID is part of the first 100 reserved IDs.
-     *
+     * 检查目录ID是否是前100个保留ID的一部分。
      * @param uuid the directory ID to check.
      * @return     true only if the directory ID is reserved.
      */

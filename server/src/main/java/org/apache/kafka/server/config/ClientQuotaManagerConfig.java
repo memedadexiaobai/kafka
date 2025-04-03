@@ -22,8 +22,8 @@ public class ClientQuotaManagerConfig {
     /**
      * Configuration settings for quota management
      *
-     * @param numQuotaSamples         The number of samples to retain in memory
-     * @param quotaWindowSizeSeconds  The time span of each sample
+     * @param numQuotaSamples         The number of samples to retain in memory 要保留在内存中的样本数
+     * @param quotaWindowSizeSeconds  The time span of each sample 每个样本的时间跨度
      */
     public ClientQuotaManagerConfig(int numQuotaSamples, int quotaWindowSizeSeconds) {
         this.numQuotaSamples = numQuotaSamples;

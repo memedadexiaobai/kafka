@@ -31,13 +31,28 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
- * This class encapsulates a thread-safe navigable map of LogSegment instances and provides the
+ * This class encapsulates(概括，压缩) a thread-safe navigable map of LogSegment instances and provides the
  * required read and write behavior on the map.
  */
 public class LogSegments {
 
     private final TopicPartition topicPartition;
     /* the segments of the log with key being LogSegment base offset and value being a LogSegment */
+    /**
+     * ConcurrentNavigableMap 是 Java 并发包 java.util.concurrent 中的一个接口，继承自 ConcurrentMap 和 NavigableMap。
+     * 它结合了并发性和导航功能，提供了在多线程环境中高效、安全地操作有序映射的能力。
+     * 优势
+     *  1.并发性：ConcurrentNavigableMap 实现了 ConcurrentMap 接口，这意味着它在多线程环境下具有良好的并发性能。
+     *      多个线程可以同时读取和写入不同的部分，而不会导致整个映射被锁住，从而提高了并发操作的效率。
+     *  2.导航功能：继承自 NavigableMap，提供了丰富的导航方法，如 ceilingEntry、floorEntry、higherEntry 和 lowerEntry，这些方法允许你高效地查找最接近给定键的条目。
+     *      这对于需要按顺序访问或查找特定范围内的条目的场景非常有用。
+     *  3.线程安全：ConcurrentNavigableMap 的实现（如 ConcurrentSkipListMap）是线程安全的，无需外部同步即可在多线程环境中安全使用。
+     * 适合的场景
+     *  1.多线程环境下的有序映射：当你需要在一个多线程环境中维护一个有序的映射，并且希望在并发读写操作中保持高性能时，ConcurrentNavigableMap 是一个理想的选择。
+     *  2.范围查询：如果你的应用需要频繁地进行范围查询（例如，查找某个键范围内的所有条目），ConcurrentNavigableMap 提供的导航方法可以显著提高查询效率。
+     *  3.动态排序：在需要动态排序的场景中，ConcurrentNavigableMap 可以高效地插入和删除条目，同时保持映射的有序性。
+     *  4.缓存和索引：在构建缓存或索引时，ConcurrentNavigableMap 可以提供高效的并发访问和有序性，适用于需要快速查找和更新的场景
+     */
     private final ConcurrentNavigableMap<Long, LogSegment> segments = new ConcurrentSkipListMap<>();
 
     /**

@@ -180,7 +180,7 @@ public class TransactionIndex implements Closeable {
     }
 
     /**
-     * Do a basic sanity check on this index to detect obvious problems.
+     * Do a basic sanity(健全性) check on this index to detect obvious(明显的) problems.
      *
      * @throws CorruptIndexException if any problems are found.
      */

@@ -34,14 +34,14 @@ import java.nio.file.Files;
 import java.util.OptionalLong;
 
 /**
- * Clean shutdown file that indicates the broker was cleanly shutdown in 0.8 and higher.
- * This is used to avoid unnecessary recovery after a clean shutdown. In theory this could be
- * avoided by passing in the recovery point, however finding the correct position to do this
+ * Clean shutdown file that indicates the broker was cleanly(干净的) shutdown(彻底关闭) in 0.8 and higher.
+ * This is used to avoid unnecessary recovery after a clean shutdown.
+ * In theory(理论上) this could be avoided by passing in the recovery point, however finding the correct position to do this
  * requires accessing the offset index which may not be safe in an unclean shutdown.
  * For more information see the discussion in PR#2104
  *
  * Also, the clean shutdown file can also store the broker epoch, this can be used in the broker registration to
- * demonstrate the last reboot is a clean shutdown. (KIP-966)
+ * demonstrate(证明，演示) the last reboot is a clean shutdown. (KIP-966)
  */
 
 public class CleanShutdownFileHandler {
