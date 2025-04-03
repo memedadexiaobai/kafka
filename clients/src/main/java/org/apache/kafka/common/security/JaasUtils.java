@@ -23,6 +23,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.security.auth.login.Configuration;
 
+/**
+ * 提供了zk相关的JAAS相关配置常量 和 是否启用JAAS的判断
+ */
 public final class JaasUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JaasUtils.class);
     public static final String JAVA_LOGIN_CONFIG_PARAM = "java.security.auth.login.config";
@@ -80,4 +83,5 @@ public final class JaasUtils {
 
         return foundLoginConfigEntry;
     }
+
 }

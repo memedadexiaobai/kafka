@@ -17,7 +17,7 @@
 package org.apache.kafka.common.record;
 
 /**
- * Base interface for accessing records which could be contained in the log, or an in-memory materialization of log records.
+ * Base interface for accessing records which could be contained in the log, or an in-memory materialization(实现) of log records.
  */
 public interface BaseRecords {
     /**
@@ -27,7 +27,7 @@ public interface BaseRecords {
     int sizeInBytes();
 
     /**
-     * Encapsulate this {@link BaseRecords} object into {@link RecordsSend}
+     * Encapsulate(概括，囊括) this {@link BaseRecords} object into {@link RecordsSend}
      * @return Initialized {@link RecordsSend} object
      */
     RecordsSend<? extends BaseRecords> toSend();

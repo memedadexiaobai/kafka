@@ -35,7 +35,7 @@ public enum RecordVersion {
     }
 
     /**
-     * Check whether this version precedes another version.
+     * Check whether this version precedes(先于) another version.
      *
      * @return true only if the magic value is less than the other's
      */

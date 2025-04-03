@@ -201,7 +201,7 @@ public enum Errors {
             OffsetMetadataTooLarge::new),
     NETWORK_EXCEPTION(13, "The server disconnected before a response was received.",
             NetworkException::new),
-    COORDINATOR_LOAD_IN_PROGRESS(14, "The coordinator is loading and hence can't process requests.",
+    COORDINATOR_LOAD_IN_PROGRESS(14, "The coordinator is loading and hence(因此) can't process requests.",
             CoordinatorLoadInProgressException::new),
     COORDINATOR_NOT_AVAILABLE(15, "The coordinator is not available.",
             CoordinatorNotAvailableException::new),
@@ -282,7 +282,7 @@ public enum Errors {
             "the broker (as configured by transaction.max.timeout.ms).",
             InvalidTxnTimeoutException::new),
     CONCURRENT_TRANSACTIONS(51, "The producer attempted to update a transaction " +
-            "while another concurrent operation on the same transaction was ongoing.",
+            "while another concurrent operation on the same transaction was ongoing(持续存在).",
             ConcurrentTransactionsException::new),
     TRANSACTION_COORDINATOR_FENCED(52, "Indicates that the transaction coordinator sending a WriteTxnMarker " +
             "is no longer the current coordinator for a given producer.",

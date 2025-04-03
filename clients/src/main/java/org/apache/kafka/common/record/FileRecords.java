@@ -78,8 +78,10 @@ public class FileRecords extends AbstractRecords implements Closeable {
             int limit = Math.min((int) channel.size(), end);
             size.set(limit - start);
 
-            // if this is not a slice, update the file pointer to the end of the file
+            // if this is not a slice(片，部分), update the file pointer to the end of the file
             // set the file position to the last byte in the file
+            //调用 position(long newPosition) 方法可以设置文件通道的当前位置。
+            // newPosition 参数指定了新的位置，从文件开头算起。设置新的位置后，后续的读写操作将从这个新位置开始。
             channel.position(limit);
         }
 
@@ -422,11 +424,11 @@ public class FileRecords extends AbstractRecords implements Closeable {
     }
 
     public static FileRecords open(File file,
-                                   boolean mutable,
+                                   boolean mutable, //mutable:可变的
                                    boolean fileAlreadyExists,
                                    int initFileSize,
                                    boolean preallocate) throws IOException {
-        FileChannel channel = openChannel(file, mutable, fileAlreadyExists, initFileSize, preallocate);
+        FileChannel channel = openChannel(file, mutable, fileAlreadyExists, initFileSize, preallocate); //preallocate:预分配
         int end = (!fileAlreadyExists && preallocate) ? 0 : Integer.MAX_VALUE;
         return new FileRecords(file, channel, 0, end, false);
     }

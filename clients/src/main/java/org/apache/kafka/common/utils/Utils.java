@@ -975,6 +975,16 @@ public final class Utils {
      * Note: We don't fsync directories on Windows OS because otherwise it'll throw AccessDeniedException (KAFKA-13391)
      *
      * @throws IOException if flushing the directory fails.
+     *
+     * 在计算机系统中，文件的数据和元数据通常先写入操作系统的缓存中，然后再逐步写入到持久化存储设备（如硬盘）。
+     * 这种缓存机制可以显著提高写入性能，因为缓存操作比直接写入磁盘要快得多。这种方式也带来了一些风险，特别是在系统崩溃或断电的情况下，缓存中的数据可能会丢失。
+     * 为了确保数据的安全性和一致性，FileChannel 提供了 force 方法，用于将文件的数据和元数据强制写入到持久化存储设备中。具体流程如下：
+     *  1.数据写入缓存：当应用程序调用 write 方法将数据写入文件时，数据首先被写入操作系统的缓存中，而不是直接写入磁盘。
+     *  2.元数据更新：文件的元数据（如文件大小、修改时间等）也会被更新，这些元数据同样先写入缓存。
+     *  3.调用 force 方法：应用程序调用 force 方法，指定是否需要刷新元数据。如果参数为 true，则同时刷新数据和元数据；如果为 false，则只刷新数据。
+     *  4.操作系统处理：操作系统接收到 force 请求后，将缓存中的数据和元数据写入到持久化存储设备中。这个过程是同步的，即在 force 方法返回之前，数据和元数据已经被写入磁盘。
+     *  5.确认写入完成：一旦数据和元数据成功写入磁盘，操作系统会返回确认信息，force 方法返回，表示写入操作已完成。
+     *
      */
     public static void flushDir(Path path) throws IOException {
         if (path != null && !OperatingSystem.IS_WINDOWS && !OperatingSystem.IS_ZOS) {

@@ -37,15 +37,15 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * This class is used for specifying the set of expected configurations. For each configuration, you can specify
+ * This class is used for specifying(说明) the set of expected configurations. For each configuration, you can specify
  * the name, the type, the default value, the documentation, the group information, the order in the group,
  * the width of the configuration value and the name suitable for display in the UI.
  *
  * You can provide special validation logic used for single configuration validation by overriding {@link Validator}.
  *
- * Moreover, you can specify the dependents of a configuration. The valid values and visibility of a configuration
- * may change according to the values of other configurations. You can override {@link Recommender} to get valid
- * values and set visibility of a configuration given the current configuration values.
+ * Moreover(此外), you can specify the dependents of a configuration.
+ * The valid values and visibility of a configuration may change according to(词组：根据) the values of other configurations.
+ * You can override {@link Recommender} to get valid values and set visibility of a configuration given the current configuration values.
  *
  * <p/>
  * To use the class:
@@ -77,6 +77,17 @@ import java.util.stream.Collectors;
  * <p/>
  * This class can be used standalone or in combination with {@link AbstractConfig} which provides some additional
  * functionality for accessing configs.
+ *
+ * 顾名思义：配置定义，内部提供了三个主要的属性：
+ *  configKeys用于存放 配置名 -> 配置信息 的映射
+ *  groups：存放所有的配置组名
+ *  configsWithNoParent：存放没有依赖的配置名
+ * 内部核心类：ConfigKey 用于存放配置信息
+ * 涉及2个接口：
+ *  Validator：用于单个配置项的验证，比如数据范围大小验证类：Range
+ *  Recommender(推荐人)：提供2个方法：
+ *      validValues：根据配置名，从parsedConfig已解析的配置中读取出所有对应的值
+ *      visible：返回配置名的可见性，参数同样有 parsedConfig
  */
 public class ConfigDef {
 
@@ -918,7 +929,7 @@ public class ConfigDef {
     public interface Recommender {
 
         /**
-         * The valid values for the configuration given the current configuration values.
+         * The valid values for the configuration given the current configuration values. 给定当前配置值的配置的有效值。
          * @param name The name of the configuration
          * @param parsedConfig The parsed configuration values
          * @return The list of valid values. To function properly, the returned objects should have the type
@@ -937,6 +948,7 @@ public class ConfigDef {
 
     /**
      * Validation logic the user may provide to perform single configuration validation.
+     * 用户可以提供验证逻辑来执行单个配置验证。
      */
     public interface Validator {
         /**
@@ -1248,6 +1260,7 @@ public class ConfigDef {
         public final List<String> dependents;
         public final Recommender recommender;
         public final boolean internalConfig;
+        //可代替字符串 我理解可以有简称 这个是简称的设置
         public final String alternativeString;
 
         // This constructor is present for backward compatibility reasons.

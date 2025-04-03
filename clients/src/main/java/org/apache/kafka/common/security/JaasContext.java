@@ -38,6 +38,17 @@ import javax.security.auth.login.Configuration;
 import static org.apache.kafka.common.security.JaasUtils.DISALLOWED_LOGIN_MODULES_CONFIG;
 import static org.apache.kafka.common.security.JaasUtils.DISALLOWED_LOGIN_MODULES_DEFAULT;
 
+/**
+ * JaasContext分为2类：
+ *  客户端：
+ *      上下文：KafkaClient
+ *      对应方法：loadClientContext
+ *      对应配置：sasl.jaas.config
+ *  服务端：
+ *      上下文：KafkaServer
+ *      对应方法：loadServerContext
+ *      对应配置：listener.name.{listenerName}.{mechanism}.sasl.jaas.config
+ */
 public class JaasContext {
 
     private static final Logger LOG = LoggerFactory.getLogger(JaasContext.class);
@@ -119,6 +130,7 @@ public class JaasContext {
 
     private static JaasContext defaultContext(JaasContext.Type contextType, String listenerContextName,
                                               String globalContextName) {
+        //java.security.auth.login.config
         String jaasConfigFile = System.getProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM);
         if (jaasConfigFile == null) {
             if (contextType == Type.CLIENT) {

@@ -18,6 +18,9 @@ package org.apache.kafka.common.config;
 
 import org.apache.kafka.common.config.ConfigDef.Range;
 
+/**
+ * SASL 的相关配置属性及其说明 同时通过addClientSaslSupport方法添加默认的SASL配置定义
+ */
 public class SaslConfigs {
 
     private static final String OAUTHBEARER_NOTE = " Currently applies only to OAUTHBEARER.";

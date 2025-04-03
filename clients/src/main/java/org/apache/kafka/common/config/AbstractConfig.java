@@ -54,7 +54,7 @@ public class AbstractConfig {
      */
     private final Set<String> used = ConcurrentHashMap.newKeySet();
 
-    /* the original values passed in by the user */
+    /* the original values passed in by the user 用户传入的原始值 */
     private final Map<String, ?> originals;
 
     /* the parsed values */

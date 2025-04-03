@@ -43,13 +43,43 @@ import javax.security.auth.login.Configuration;
  *   <loginModuleClass> <controlFlag> (<optionName>=<optionValue>)*;
  * }
  * </pre>
+ *
+ * 该类解析Jaas文件中的loginModule信息转为AppConfigurationEntry
+ * loginContextName：代表当前上下文 如KafkaServer
+ * configEntries：存储对应的LoginModule信息，可能存在多个LoginModule 这里用list存储
  */
 class JaasConfig extends Configuration {
 
     private final String loginContextName;
     private final List<AppConfigurationEntry> configEntries;
 
+    /**
+     * 比如 "KafkaServer { test.LoginModule required; };",
+     * @param loginContextName KafkaServer
+     * @param jaasConfigParams  test.LoginModule required; 解析后转为 AppConfigurationEntry
+     */
     public JaasConfig(String loginContextName, String jaasConfigParams) {
+        /**
+         * StreamTokenizer 是 Java 标准库中的一个工具类，用于将输入流中的文本分解成“令牌”（tokens）。
+         * 它通常用于解析结构化的文本数据，如配置文件、脚本语言等
+         *
+         * 主要方法：
+         * int nextToken()：
+         *  读取下一个令牌，并返回其类型。常见的返回值有：
+         *      TT_EOF：表示已到达输入流的末尾。
+         *      TT_EOL：表示已到达行尾。
+         *      TT_NUMBER：表示读取到一个数字。
+         *      TT_WORD：表示读取到一个单词。
+         *      其他值：表示读取到的单个字符。
+         *  读取到的数字可以通过 nval 属性获取，读取到的单词或字符串可以通过 sval 属性获取。
+         * void resetSyntax()：重置默认的语法，使所有字符都被视为普通字符。
+         * void wordChars(int low, int hi)：将指定范围内的字符标记为单词字符。例如，wordChars('a', 'z') 表示小写字母都是单词字符。
+         * void whitespaceChars(int low, int hi)：将指定范围内的字符标记为空白字符。例如，whitespaceChars(' ', ' ') 表示空格是空白字符。
+         * void ordinaryChar(int ch)：将指定字符标记为普通字符，不再被视为特殊字符。
+         * void commentChar(int ch)：将指定字符标记为注释字符。例如，commentChar('#') 表示 # 后面的内容是注释。
+         * void quoteChar(int ch)：将指定字符标记为引号字符，用于包围字符串。例如，quoteChar('"') 表示双引号可以包围字符串。
+         * void parseNumbers()：启用数字解析，使 StreamTokenizer 能够识别并解析数字。
+         */
         StreamTokenizer tokenizer = new StreamTokenizer(new StringReader(jaasConfigParams));
         tokenizer.slashSlashComments(true);
         tokenizer.slashStarComments(true);
@@ -121,4 +151,5 @@ class JaasConfig extends Configuration {
             throw new IllegalArgumentException("JAAS config entry not terminated by semi-colon");
         return new AppConfigurationEntry(loginModule, controlFlag, options);
     }
+    
 }

@@ -29,7 +29,7 @@ public interface Send {
     boolean completed();
 
     /**
-     * Write some as-yet unwritten bytes from this send to the provided channel. It may take multiple calls for the send
+     * Write some as-yet(到目前为止) unwritten bytes from this send to the provided channel. It may take multiple calls for the send
      * to be completely written
      * @param channel The Channel to write to
      * @return The number of bytes written

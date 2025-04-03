@@ -15,6 +15,6 @@
  * limitations under the License.
  */
 /**
- * Provides mechanisms for securing a Kafka cluster and authenticating Kafka clients.
+ * Provides mechanisms(机制) for securing(使安全 保护) a Kafka cluster and authenticating Kafka clients.
  */
 package org.apache.kafka.common.security;

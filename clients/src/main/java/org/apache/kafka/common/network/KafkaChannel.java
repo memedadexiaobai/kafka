@@ -33,10 +33,9 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
- * A Kafka connection either existing on a client (which could be a broker in an
- * inter-broker scenario) and representing the channel to a remote broker or the
- * reverse (existing on a broker and representing the channel to a remote
- * client, which could be a broker in an inter-broker scenario).
+ * A Kafka connection either existing on a client (which could be a broker in an inter-broker scenario)
+ * and representing the channel to a remote broker or the reverse (existing on a broker and representing the channel to a remote client,
+ * which could be a broker in an inter-broker scenario).
  * <p>
  * Each instance has the following:
  * <ul>
