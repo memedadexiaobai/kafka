@@ -629,6 +629,7 @@ class KafkaZkClient private[zk] (
    */
   def getAllTopicsInCluster(registerWatch: Boolean = false): Set[String] = {
     val getChildrenResponse = retryRequestUntilConnected(
+      //节点：/brokers/topics
       GetChildrenRequest(TopicsZNode.path, registerWatch))
     getChildrenResponse.resultCode match {
       case Code.OK => getChildrenResponse.children.toSet

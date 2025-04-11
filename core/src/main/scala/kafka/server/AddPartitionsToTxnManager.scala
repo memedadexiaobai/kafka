@@ -44,7 +44,8 @@ object AddPartitionsToTxnManager {
 
 /**
  * This is an enum which handles the Partition Response based on the Request Version and the exact operation
- *    defaultError:       This is the default workflow which maps to cases when the Produce Request Version or the Txn_offset_commit request was lower than the first version supporting the new Error Class
+ *    defaultError:       This is the default workflow which maps to cases
+ *      when the Produce Request Version or the Txn_offset_commit request was lower than the first version supporting the new Error Class
  *    genericError:       This maps to the case when the clients are updated to handle the TransactionAbortableException
  *    addPartition:       This is a WIP. To be updated as a part of KIP-890 Part 2
  */

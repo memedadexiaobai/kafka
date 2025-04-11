@@ -224,6 +224,7 @@ class LogLoader(
     val cleanedFiles = mutable.Set[File]()
     var minCleanedFileOffset = Long.MaxValue
 
+    //找到所有.clean文件中的最小偏移量
     for (file <- dir.listFiles if file.isFile) {
       if (!file.canRead)
         throw new IOException(s"Could not read file $file")
@@ -242,11 +243,12 @@ class LogLoader(
       }
     }
 
-    // KAFKA-6264: Delete all .swap files whose base offset is greater than the minimum .cleaned segment offset. Such .swap
-    // files could be part of an incomplete split operation that could not complete. See Log#splitOverflowedSegment
+    // KAFKA-6264: Delete all .swap files whose base offset is greater than the minimum .cleaned segment offset.
+    // Such .swap files could be part of an incomplete split operation that could not complete. See Log#splitOverflowedSegment
     // for more details about the split operation.
     //所有找到 .clean 文件中的最小的偏移量，这些是需要被清理的文件，小于这个最小偏移量的文件是应该被删除的，swapFiles.partition分出小于和大于最小偏移量的
     //删除小于最小偏移量的.swap文件，大于等于的保留属于有效.swap文件
+    //IterableOps.partition()方法返回一个Tuple2，第一个元素是满足条件的元素，第二个元素是不满足条件的元素
     val (invalidSwapFiles, validSwapFiles) = swapFiles.partition(file => offsetFromFile(file) >= minCleanedFileOffset)
     invalidSwapFiles.foreach { file =>
       debug(s"Deleting invalid swap file ${file.getAbsoluteFile} minCleanedFileOffset: $minCleanedFileOffset")

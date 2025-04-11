@@ -751,8 +751,10 @@ class KafkaServer(
 
   protected def createReplicaManager(isShuttingDown: AtomicBoolean): ReplicaManager = {
     val addPartitionsLogContext = new LogContext(s"[AddPartitionsToTxnManager broker=${config.brokerId}]")
+
     val addPartitionsToTxnNetworkClient = NetworkUtils.buildNetworkClient("AddPartitionsManager", config, metrics,
       time, addPartitionsLogContext)
+
     val addPartitionsToTxnManager = new AddPartitionsToTxnManager(
       config,
       addPartitionsToTxnNetworkClient,

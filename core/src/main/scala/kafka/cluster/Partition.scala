@@ -387,9 +387,9 @@ class Partition(val topicPartition: TopicPartition,
   }
 
 /**
- * When setting the min ISR, there is no restriction on it. Even if the value does not make sense to be larger than
- * the replication factor. In case there are such setting, the effective min ISR of min(replication factor, min ISR)
- * is returned here.
+ * When setting the min ISR, there is no restriction(限制) on it.
+ * Even if the value does not make sense(词组：有意义，有道理) to be larger than the replication factor.
+ * In case(万一，如果) there are such setting, the effective min ISR of min(replication factor, min ISR) is returned here.
  */
   private def effectiveMinIsr(leaderLog: UnifiedLog): Int = {
       leaderLog.config.minInSyncReplicas.min(remoteReplicasMap.size + 1)
@@ -1072,11 +1072,11 @@ class Partition(val topicPartition: TopicPartition,
 
   private def isReplicaIsrEligible(followerReplicaId: Int): Boolean = {
     metadataCache match {
-      // In KRaft mode, only a replica which meets all of the following requirements is allowed to join the ISR.
-      // 1. It is not fenced.
+      // In KRaft mode, only a replica which meets(开会，回见，集合，这里理解为满足) all of the following requirements is allowed to join the ISR.
+      // 1. It is not fenced(用栅栏、篱笆或围栏)围住，隔开；回避；搪塞；参加击剑运动；支吾).
       // 2. It is not in controlled shutdown.
-      // 3. Its metadata cached broker epoch matches its Fetch request broker epoch. Or the Fetch
-      //    request broker epoch is -1 which bypasses the epoch verification.
+      // 3. Its metadata cached broker epoch matches its Fetch request broker epoch.
+      //    Or the Fetch request broker epoch is -1 which bypasses(旁路，绕过) the epoch verification(验证，核验).
       case kRaftMetadataCache: KRaftMetadataCache =>
         val mayBeReplica = getReplica(followerReplicaId)
         // The topic is already deleted and we don't have any replica information. In this case, we can return false
@@ -1158,19 +1158,20 @@ class Partition(val topicPartition: TopicPartition,
    * 1. Partition ISR changed
    * 2. Any replica's LEO changed
    *
-   * The HW is determined by the smallest log end offset among all replicas that are in sync; or are considered caught-up
-   * and are allowed to join the ISR. This way, if a replica is considered caught-up, but its log end offset is smaller
-   * than HW, we will wait for this replica to catch up to the HW before advancing the HW. This helps the situation when
-   * the ISR only includes the leader replica and a follower tries to catch up. If we don't wait for the follower when
-   * advancing the HW, the follower's log end offset may keep falling behind the HW (determined by the leader's log end
-   * offset) and therefore will never be added to ISR.
+   * The HW is determined by the smallest log end offset among all replicas that are in sync;
+   * or are considered caught-up and are allowed to join the ISR.
+   * This way, if a replica is considered caught-up, but its log end offset is smaller than HW,
+   * we will wait for this replica to catch up to the HW before advancing the HW.
+   * This helps the situation when the ISR only includes the leader replica and a follower tries to catch up.
+   * If we don't wait for the follower when advancing the HW, the follower's log end offset may keep falling behind the HW (determined by the leader's log end offset)
+   * and therefore will never be added to ISR.
    *
    * The HW can only advance if the ISR size is equal or large than the min ISR(min.insync.replicas).
    *
-   * With the addition of AlterPartition, we also consider newly added replicas as part of the ISR when advancing
-   * the HW. These replicas have not yet been committed to the ISR by the controller, so we could revert to the previously
-   * committed ISR. However, adding additional replicas to the ISR makes it more restrictive and therefore safe. We call
-   * this set the "maximal" ISR. See KIP-497 for more details
+   * With the addition of(词组：添加了，外加) AlterPartition, we also consider newly added replicas as part of the ISR when advancing the HW.
+   * These replicas have not yet been committed to the ISR by the controller, so we could revert(恢复) to the previously committed ISR.
+   * However, adding additional replicas to the ISR makes it more restrictive(限制性的，约束的) and therefore safe.
+   * We call this set the "maximal" ISR. See KIP-497 for more details
    *
    * Note There is no need to acquire the leaderIsrUpdate lock here since all callers of this private API acquire that lock
    *
@@ -1181,10 +1182,10 @@ class Partition(val topicPartition: TopicPartition,
       trace(s"Not increasing HWM because partition is under min ISR(ISR=${partitionState.isr}")
       return false
     }
-    // maybeIncrementLeaderHW is in the hot path, the following code is written to
-    // avoid unnecessary collection generation
+    // maybeIncrementLeaderHW is in the hot path, the following code is written to avoid unnecessary collection generation
     val leaderLogEndOffset = leaderLog.logEndOffsetMetadata
     var newHighWatermark = leaderLogEndOffset
+    //这里拿到的是所有分区的最小的LEO
     remoteReplicasMap.values.foreach { replica =>
       val replicaState = replica.stateSnapshot
 
@@ -1263,7 +1264,7 @@ class Partition(val topicPartition: TopicPartition,
     if (needsIsrUpdate) {
       val alterIsrUpdateOpt = inWriteLock(leaderIsrUpdateLock) {
         leaderLogIfLocal.flatMap { leaderLog =>
-          val outOfSyncReplicaIds = getOutOfSyncReplicas(replicaLagTimeMaxMs)
+          val outOfSyncReplicaIds = getOutOfSyncReplicas(replicaLagTimeMaxMs) //获取超时的副本id
           partitionState match {
             case currentState: CommittedPartitionState if outOfSyncReplicaIds.nonEmpty =>
               val outOfSyncReplicaLog = outOfSyncReplicaIds.map { replicaId =>
@@ -1294,7 +1295,7 @@ class Partition(val topicPartition: TopicPartition,
   }
 
   private def needsShrinkIsr(): Boolean = {
-    //选择leader的log
+    //当前节点必须是该分区的leader节点
     leaderLogIfLocal.exists { _ => getOutOfSyncReplicas(replicaLagTimeMaxMs).nonEmpty }
   }
 
@@ -1814,6 +1815,7 @@ class Partition(val topicPartition: TopicPartition,
     // for `PendingShrinkIsr` is the the current ISR.
     val isrToSend = partitionState.isr -- outOfSyncReplicaIds
     val isrWithBrokerEpoch = addBrokerEpochToIsr(isrToSend.toList)
+
     val newLeaderAndIsr = LeaderAndIsr(
       localBrokerId,
       leaderEpoch,
@@ -1821,11 +1823,13 @@ class Partition(val topicPartition: TopicPartition,
       isrWithBrokerEpoch,
       partitionEpoch
     )
+
     val updatedState = PendingShrinkIsr(
       outOfSyncReplicaIds,
       newLeaderAndIsr,
       currentState
     )
+
     partitionState = updatedState
     updatedState
   }
@@ -1970,7 +1974,7 @@ class Partition(val topicPartition: TopicPartition,
     proposedIsrState: PendingPartitionChange,
     leaderAndIsr: LeaderAndIsr
   ): Boolean = {
-    // Success from controller, still need to check a few things
+    // Success from controller, still need to check a few things 保证是同一个Controller
     if (leaderAndIsr.leaderEpoch != leaderEpoch) {
       debug(s"Ignoring new ISR $leaderAndIsr since we have a stale leader epoch $leaderEpoch.")
       alterPartitionListener.markFailed()

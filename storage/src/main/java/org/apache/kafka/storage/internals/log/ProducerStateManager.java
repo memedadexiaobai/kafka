@@ -62,13 +62,12 @@ import java.util.stream.Stream;
  * The epoch is used for fencing(隔开) against zombie writers.
  * The offset is the one of the last successful message appended to the partition.
  * <p>
- * As long as a producer id is contained in the map, the corresponding producer can continue to write data.
- * However, producer ids can be expired due to lack of recent use or if the last written entry has been deleted from
+ * As long as(只要，与...一样长) a producer id is contained in the map, the corresponding producer can continue to write data.
+ * However, producer ids can be expired due to lack(缺乏) of recent use or if the last written entry has been deleted from
  * the log (e.g. if the retention policy is "delete"). For compacted topics, the log cleaner will ensure
- * that the most recent entry from a given producer id is retained in the log provided it hasn't expired due to
- * age. This ensures that producer ids will not be expired until either the max expiration time has been reached,
- * or if the topic also is configured for deletion, the segment containing the last written offset has
- * been deleted.
+ * that the most recent entry from a given producer id is retained in the log provided it hasn't expired due to age.
+ * This ensures that producer ids will not be expired until either the max expiration time has been reached,
+ * or if the topic also is configured for deletion, the segment containing the last written offset has been deleted.
  */
 public class ProducerStateManager {
 

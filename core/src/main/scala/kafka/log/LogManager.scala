@@ -98,7 +98,7 @@ class LogManager(logDirs: Seq[File],
   // Each element in the queue contains the log object to be deleted and the time it is scheduled for deletion.
   private val logsToBeDeleted = new LinkedBlockingQueue[(UnifiedLog, Long)]()
 
-  // Map of stray partition to stray log. This holds all stray logs detected on the broker.
+  // Map of stray(偏离的) partition to stray log. This holds all stray logs detected on the broker.
   // Visible for testing
   private val strayLogs = new Pool[TopicPartition, UnifiedLog]()
 
@@ -415,9 +415,9 @@ class LogManager(logDirs: Seq[File],
     val startMs = time.hiResClockMs()
     val threadPools = ArrayBuffer.empty[ExecutorService] //每个目录一个线程池
     val offlineDirs = mutable.Set.empty[(String, IOException)]
-    val jobs = ArrayBuffer.empty[Seq[Future[_]]] //一共有多少个job 一个文件对应一个任务，也可以理解为有多少个文件需要处理
-    var numTotalLogs = 0 //一共有多少需要处理的文件
-    // log dir path -> number of Remaining logs map for remainingLogsToRecover metric 目录->该目录需要处理的文件
+    val jobs = ArrayBuffer.empty[Seq[Future[_]]] //一共有多少个job 一个目录对应一个任务，也可以理解为有多少个目录需要处理
+    var numTotalLogs = 0 //一共有多少需要处理的目录
+    // log dir path -> number of Remaining logs map for remainingLogsToRecover metric 目录->该目录下需要处理的目录
     val numRemainingLogs: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]
     // log recovery thread name -> number of remaining segments map for remainingSegmentsToRecover metric
     val numRemainingSegments: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]
@@ -621,8 +621,8 @@ class LogManager(logDirs: Seq[File],
 
   // visible for testing
   private[log] def startupWithConfigOverrides(
-    defaultConfig: LogConfig,
-    topicConfigOverrides: Map[String, LogConfig],
+    defaultConfig: LogConfig, //相当于全局配置
+    topicConfigOverrides: Map[String, LogConfig], //相当于主题的个性化配置
     isStray: UnifiedLog => Boolean): Unit = {
 
     loadLogs(defaultConfig, topicConfigOverrides, isStray) // this could take a while if shutdown was not clean
@@ -1569,8 +1569,9 @@ object LogManager {
     val defaultProps = config.extractLogConfigMap
 
     LogConfig.validateBrokerLogConfigValues(defaultProps, config.remoteLogManagerConfig.isRemoteStorageSystemEnabled())
-    //有存储就得清理  LogCleaner日志清理器
+
     val defaultLogConfig = new LogConfig(defaultProps)
+    //有存储就得清理  LogCleaner日志清理器
     val cleanerConfig = LogCleaner.cleanerConfig(config)
 
     new LogManager(logDirs = config.logDirs.map(new File(_).getAbsoluteFile),
@@ -1583,15 +1584,14 @@ object LogManager {
       recoveryThreadsPerDataDir = config.numRecoveryThreadsPerDataDir,
 
       flushCheckMs = config.logFlushSchedulerIntervalMs,
-
       flushRecoveryOffsetCheckpointMs = config.logFlushOffsetCheckpointIntervalMs,
       flushStartOffsetCheckpointMs = config.logFlushStartOffsetCheckpointIntervalMs,
-
       retentionCheckMs = config.logCleanupIntervalMs,
-
       maxTransactionTimeoutMs = config.transactionMaxTimeoutMs,
+
       producerStateManagerConfig = new ProducerStateManagerConfig(config.producerIdExpirationMs, config.transactionPartitionVerificationEnable),
       producerIdExpirationCheckIntervalMs = config.producerIdExpirationCheckIntervalMs,
+
       scheduler = kafkaScheduler,
       brokerTopicStats = brokerTopicStats,
       logDirFailureChannel = logDirFailureChannel,

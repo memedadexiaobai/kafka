@@ -129,7 +129,7 @@ public class LeaderEpochFileCache {
         }
 
         // Check whether the append is needed before acquiring the write lock
-        // in order to avoid contention with readers in the common case
+        // in order to avoid contention(争论) with readers in the common case
         if (!isUpdateNeeded(entry)) return false;
 
         lock.writeLock().lock();
@@ -147,7 +147,9 @@ public class LeaderEpochFileCache {
     }
 
     /**
-     * Remove any entries which violate monotonicity prior to appending a new entry
+     * Remove any entries which violate(违反) monotonicity(单一性) prior to appending a new entry 在添加新条目之前，删除任何违反单调性的条目
+     * epochs实现为TreeMap，默认排序为自然顺序，也就是从小到大，epochs.descendingMap()返回一个逆序的map，即从大到小
+     * 添加新元素即newEntry时候，遍历整个逆序列表，凡是epoch大于等于newEntry.epoch或者startOffset大于等于newEntry.startOffset的元素都删除，维持数据的单一递增
      */
     private void maybeTruncateNonMonotonicEntries(EpochEntry newEntry) {
         List<EpochEntry> removedEpochs = removeWhileMatching(

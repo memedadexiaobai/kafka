@@ -313,7 +313,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    */
   def maybeIncrementHighWatermark(newHighWatermark: LogOffsetMetadata): Option[LogOffsetMetadata] = {
     if (newHighWatermark.messageOffset > logEndOffset)
-      throw new IllegalArgumentException(s"High watermark $newHighWatermark update exceeds current " +
+      throw new IllegalArgumentException(s"High watermark $newHighWatermark update exceeds(超过) current " +
         s"log end offset ${localLog.logEndOffsetMetadata}")
 
     lock.synchronized {
@@ -2122,8 +2122,7 @@ object UnifiedLog extends Logging {
   /**
    * If the recordVersion is >= RecordVersion.V2, create a new LeaderEpochFileCache instance.
    * Loading the epoch entries from the backing checkpoint file or the provided currentCache if not empty.
-   * Otherwise, the message format is considered incompatible and the existing LeaderEpoch file
-   * is deleted.
+   * Otherwise, the message format is considered incompatible and the existing LeaderEpoch file is deleted.
    *
    * @param dir                  The directory in which the log will reside
    * @param topicPartition       The topic partition

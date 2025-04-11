@@ -114,6 +114,7 @@ object AlterPartitionManager {
   ): AlterPartitionManager = {
     new ZkAlterPartitionManager(scheduler, time, zkClient)
   }
+
 }
 
 class DefaultAlterPartitionManager(
