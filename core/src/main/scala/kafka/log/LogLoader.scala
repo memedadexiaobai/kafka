@@ -88,13 +88,13 @@ class LogLoader(
   def load(): LoadedLogOffsets = {
     // First pass: through the files in the log directory and remove any temporary files
     // and find any interrupted swap operations
-    //1.找到所有.clean中的最小偏移量，删除所有小于该最小偏移量的.swap文件
+    //1.找到所有.clean中的最小偏移量并且删除所有大于该最小偏移量的.swap文件
     //2.删除所有.clean文件
-    //3.返回所有大于最小偏移量的.swap文件
+    //3.返回所有小于最小偏移量的.swap文件
     val swapFiles = removeTempFilesAndCollectSwapFiles()
 
     // The remaining(剩下的) valid swap files must come from compaction(压缩，压实) or segment split operation.
-    // We can simply rename them to regular segment files. But, before renaming, we should figure out(解决，算出) which
+    // We can simply(仅仅) rename them to regular segment files. But, before renaming, we should figure out(解决，算出) which
     // segments are compacted/split and delete these segment files: this is done by calculating min/maxSwapFileOffset.
     // We store segments that require renaming in this code block, and do the actual renaming later.
     var minSwapFileOffset = Long.MaxValue
@@ -116,8 +116,7 @@ class LogLoader(
     }
 
     // Second pass: delete segments that are between minSwapFileOffset and maxSwapFileOffset.
-    // As discussed above, these segments were compacted or split but haven't been renamed to .delete
-    // before shutting down the broker.
+    // As discussed above, these segments were compacted or split but haven't been renamed to .delete before shutting down the broker.
     for (file <- dir.listFiles if file.isFile) {
       try {
         if (!file.getName.endsWith(SwapFileSuffix)) {
@@ -146,9 +145,8 @@ class LogLoader(
     // We might encounter(遭遇，遇到) legacy(遗留的) log segments with offset overflow (KAFKA-6264). We need to split such segments. When
     // this happens, restart loading segment files from scratch.
     retryOnOffsetOverflow(() => {
-      // In case we encounter a segment with offset overflow, the retry logic will split it after which we need to retry
-      // loading of segments. In that case, we also need to close all segments that could have been left open in previous
-      // call to loadSegmentFiles().
+      // In case we encounter a segment with offset overflow, the retry logic will split it after which we need to retry loading of segments.
+      // In that case, we also need to close all segments that could have been left open in previous call to loadSegmentFiles().
       segments.close()
       segments.clear()
       loadSegmentFiles()
@@ -211,10 +209,14 @@ class LogLoader(
   }
 
   /**
-   * Removes any temporary files found in log directory, and creates a list of all .swap files which could be swapped
-   * in place of existing segment(s). For log splitting, we know that any .swap file whose base offset is higher than
-   * the smallest offset .clean file could be part of an incomplete split operation. Such .swap files are also deleted
-   * by this method.
+   * Removes any temporary files found in log directory, and creates a list of all .swap files which could be swapped in place of existing segment(s).
+   * For log splitting, we know that any .swap file whose base offset is higher than the smallest offset .clean file could be part of an incomplete split operation.
+   * Such .swap files are also deleted by this method.
+   *
+   * Log Compaction过程中会将对每个日志分组中需要保留的消息拷贝到一个以“.clean”为后缀的临时文件中，
+   *  此临时文件以当前日志分组中第一个日志分段的文件名命名，例如：00000000000000000000.log.clean。
+   * Log Compaction过后将“.clean”的文件修改为以“.swap”后缀的文件，例如：00000000000000000000.log.swap，
+   *  然后删除掉原本的日志文件，最后才把文件的“.swap”后缀去掉，整个过程中的索引文件的变换也是如此，至此一个完整Log Compaction操作才算完成。
    *
    * @return Set of .swap files that are valid to be swapped in as segment files and index files
    */

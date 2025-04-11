@@ -57,12 +57,14 @@ import scala.compat.java8.OptionConverters._
 import scala.jdk.CollectionConverters._
 
 /**
- * A log which presents a unified view of local and tiered log segments.
+ * A log which presents a unified view of local and tiered(...层的，分层的) log segments.
  *
- * The log consists of tiered and local segments with the tiered portion of the log being optional. There could be an
- * overlap between the tiered and local segments. The active segment is always guaranteed to be local. If tiered segments
- * are present, they always appear at the beginning of the log, followed by an optional region of overlap, followed by the local
- * segments including the active segment.
+ * The log consists of tiered and local segments with the tiered portion of the log being optional.
+ * There could be an overlap(重叠) between the tiered and local segments.
+ * The active segment is always guaranteed to be local.
+ * If tiered segments are present, they always appear at the beginning of the log,
+ *  followed by an optional region of overlap,
+ *  followed by the local segments including the active segment.
  *
  * NOTE: this class handles state and behavior specific to tiered segments as well as any behavior combining both tiered
  * and local segments. The state and behavior specific to local segments are handled by the encapsulated LocalLog instance.

@@ -36,8 +36,8 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * A {@link Records} implementation backed by a file. An optional start and end position can be applied to this
- * instance to enable slicing a range of the log records.
+ * A {@link Records} implementation backed(支持，帮助) by a file.
+ * An optional start and end position can be applied to this instance to enable slicing a range of the log records.
  */
 public class FileRecords extends AbstractRecords implements Closeable {
     private final boolean isSlice;
@@ -68,7 +68,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
         this.size = new AtomicInteger();
 
         if (isSlice) {
-            // don't check the file size if this is just a slice view
+            // don't check the file size if this is just a slice(切片) view
             size.set(end - start);
         } else {
             if (channel.size() > Integer.MAX_VALUE)
@@ -80,7 +80,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
 
             // if this is not a slice(片，部分), update the file pointer to the end of the file
             // set the file position to the last byte in the file
-            //调用 position(long newPosition) 方法可以设置文件通道的当前位置。
+            // 调用 position(long newPosition) 方法可以设置文件通道的当前位置。
             // newPosition 参数指定了新的位置，从文件开头算起。设置新的位置后，后续的读写操作将从这个新位置开始。
             channel.position(limit);
         }
@@ -465,9 +465,11 @@ public class FileRecords extends AbstractRecords implements Closeable {
                                            boolean preallocate) throws IOException {
         if (mutable) {
             if (fileAlreadyExists || !preallocate) {
-                return FileChannel.open(file.toPath(), StandardOpenOption.CREATE, StandardOpenOption.READ,
-                        StandardOpenOption.WRITE);
+                return FileChannel.open(file.toPath(),
+                        StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
             } else {
+                //RandomAccessFile 是 Java 中的一个类，用于随机访问文件。与传统的流式文件操作（如 FileInputStream 和 FileOutputStream）不同，
+                // RandomAccessFile 允许你在文件中的任何位置进行读写操作，而不仅仅是从头到尾顺序读写。
                 RandomAccessFile randomAccessFile = new RandomAccessFile(file, "rw");
                 randomAccessFile.setLength(initFileSize);
                 return randomAccessFile.getChannel();
