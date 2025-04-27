@@ -42,13 +42,14 @@ import static org.apache.kafka.common.record.Records.LOG_OVERHEAD;
 import static org.apache.kafka.common.record.Records.OFFSET_OFFSET;
 
 /**
- * This {@link RecordBatch} implementation is for magic versions 0 and 1. In addition to implementing
- * {@link RecordBatch}, it also implements {@link Record}, which exposes the duality of the old message
- * format in its handling of compressed messages. The wrapper record is considered the record batch in this
- * interface, while the inner records are considered the log records (though they both share the same schema).
+ * This {@link RecordBatch} implementation is for magic versions 0 and 1. In addition to(词组，除了) implementing
+ * {@link RecordBatch}, it also implements {@link Record},
+ * which exposes the duality(二元性，双重性) of the old message format in its handling of compressed messages.
+ * The wrapper record is considered the record batch in this interface, while the inner records are considered the log records (though they both share the same schema).
  *
  * In general, this class should not be used directly. Instances of {@link Records} provides access to this
  * class indirectly through the {@link RecordBatch} interface.
+ * Legacy：遗产，遗留
  */
 public abstract class AbstractLegacyRecordBatch extends AbstractRecordBatch implements Record {
 

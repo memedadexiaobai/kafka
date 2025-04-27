@@ -294,7 +294,7 @@ class LogCleaner(initialConfig: CleanerConfig,
   }
 
   /**
-   *  Resume the cleaning of paused partitions.
+   *  Resume(简历，摘要，重新开始) the cleaning of paused partitions.
    *
    *  @param topicPartitions The collection of topicPartitions to be resumed cleaning
    */

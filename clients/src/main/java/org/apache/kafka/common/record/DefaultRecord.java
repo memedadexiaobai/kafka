@@ -51,7 +51,7 @@ import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V2;
  * the length of the field. The array type used for the headers also uses a Varint for the number of
  * headers.
  *
- * The current record attributes are depicted below:
+ * The current record attributes are depicted(描绘，描述) below:
  *
  *  ----------------
  *  | Unused (0-7) |

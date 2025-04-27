@@ -196,8 +196,8 @@ public class LogSegment implements Closeable {
     }
 
     /**
-     * The first time this is invoked, it will result in a time index lookup (including potential materialization of
-     * the time index).
+     * The first time this is invoked, it will result in a time index lookup
+     * (including potential(潜在的) materialization of the time index).
      */
     public TimestampOffset readMaxTimestampAndOffsetSoFar() throws IOException {
         if (maxTimestampAndOffsetSoFar == TimestampOffset.UNKNOWN)
@@ -208,7 +208,7 @@ public class LogSegment implements Closeable {
     /**
      * The maximum timestamp we see so far.
      *
-     * Note that this may result in time index materialization.
+     * Note that this may result in time index materialization(实现，具体化).
      */
     public long maxTimestampSoFar() throws IOException {
         return readMaxTimestampAndOffsetSoFar().timestamp;
@@ -234,8 +234,8 @@ public class LogSegment implements Closeable {
     }
 
     /**
-     * Append the given messages starting with the given offset. Add
-     * an entry to the index if needed.
+     * Append the given messages starting with the given offset.
+     * Add an entry to the index if needed.
      *
      * It is assumed this method is being called from within a lock, it is not thread-safe otherwise.
      *
@@ -262,7 +262,6 @@ public class LogSegment implements Closeable {
                 if (batchMaxTimestamp > maxTimestampSoFar()) {
                     maxTimestampAndOffsetSoFar = new TimestampOffset(batchMaxTimestamp, batchLastOffset);
                 }
-
                 if (bytesSinceLastIndexEntry > indexIntervalBytes) {
                     offsetIndex().append(batchLastOffset, physicalPosition);
                     timeIndex().maybeAppend(maxTimestampSoFar(), shallowOffsetOfMaxTimestampSoFar());
@@ -314,29 +313,36 @@ public class LogSegment implements Closeable {
                                                        int bytesToAppend) throws IOException {
         if (recordBatches.hasNext()) {
             FileChannelRecordBatch batch = recordBatches.next();
-            if (canConvertToRelativeOffset(batch.lastOffset()) &&
-                    (bytesToAppend == 0 || bytesToAppend + batch.sizeInBytes() < readBuffer.capacity()))
+            // 是否可以转成相对偏移量，最大是INTEGER.MAX_VALUE
+            if (canConvertToRelativeOffset(batch.lastOffset())
+                    //这个条件判断的目的是为了确保在追加记录批次时，不会超出缓冲区的容量限制，从而避免缓冲区溢出问题。这可以确保数据的安全性和系统的稳定性。
+                    // 如果 bytesToAppend 为 0，表示这是第一次追加，所以不需要考虑容量限制。如果 bytesToAppend 不为 0，表示之前已经追加了一些数据，需要确保追加的总字节数不超过缓冲区的容量限制。
+                    && (bytesToAppend == 0 || bytesToAppend + batch.sizeInBytes() < readBuffer.capacity()))
                 return batch;
         }
         return null;
     }
 
     /**
-     * Append records from a file beginning at the given position until either the end of the file
-     * is reached or an offset is found which is too large to convert to a relative offset for the indexes.
-     *
+     * Append records from a file beginning at the given position until
+     * either the end of the file is reached
+     * or an offset is found which is too large to convert to a relative offset for the indexes.
+     * 从文件中的给定位置开始追加记录，直到到达文件末尾或者发现偏移量太大无法转换为索引的相对偏移量。
      * @return the number of bytes appended to the log (may be less than the size of the input if an
      *         offset is encountered which would overflow this segment)
      */
     public int appendFromFile(FileRecords records, int start) throws IOException {
         int position = start;
         BufferSupplier bufferSupplier = new BufferSupplier.GrowableBufferSupplier();
-        while (position < start + records.sizeInBytes()) {
+        while (position < start + records.sizeInBytes()) { //这个相当于限制范围最大为 records 字节大小
+            // 从文件中读取一批数据，然后追加到日志中，如果追加的字节数为0，说明已经读取到文件末尾了，返回读取的字节数
+            // 如果追加的字节数不为0，说明还有数据需要读取，继续读取，直到读取到文件末尾或者发现偏移量太大无法转换为索引的相对偏移量。
             int bytesAppended = appendChunkFromFile(records, position, bufferSupplier);
             if (bytesAppended == 0)
                 return position - start;
             position += bytesAppended;
         }
+        //到这 说明读取完了
         return position - start;
     }
 

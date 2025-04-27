@@ -55,7 +55,7 @@ case class SplitSegmentResult(deletedSegments: Iterable[LogSegment], newSegments
  * @param _dir The directory in which log segments are created.
  * @param config The log configuration settings
  * @param segments The non-empty log segments recovered from disk
- * @param recoveryPoint The offset at which to begin the next recovery i.e. the first offset which has not been flushed to disk
+ * @param recoveryPoint The offset at which to begin the next recovery i.e. the first offset which has not been flushed to disk 开始下一次恢复的偏移量，即尚未刷新到磁盘的第一个偏移量
  * @param nextOffsetMetadata The offset where the next message could be appended
  * @param scheduler The thread pool scheduler used for background actions
  * @param time The time instance used for checking the clock
@@ -722,17 +722,16 @@ object LocalLog extends Logging {
   }
 
   /**
-   * Split a segment into one or more segments such that there is no offset overflow in any of them. The
-   * resulting segments will contain the exact same messages that are present in the input segment. On successful
-   * completion of this method, the input segment will be deleted and will be replaced by the resulting new segments.
+   * Split a segment into one or more segments such that there is no offset overflow in any of them.
+   * The resulting segments will contain the exact(准确的，精确的) same messages that are present in the input segment.
+   * On successful completion of this method, the input segment will be deleted and will be replaced by the resulting new segments.
    * See replaceSegments for recovery logic, in case the broker dies in the middle of this operation.
    *
-   * Note that this method assumes we have already determined that the segment passed in contains records that cause
-   * offset overflow.
+   * Note that this method assumes we have already determined that the segment passed in contains records that cause offset overflow.
    *
-   * The split logic overloads the use of .clean files that LogCleaner typically uses to make the process of replacing
-   * the input segment with multiple new segments atomic and recoverable in the event of a crash. See replaceSegments
-   * and completeSwapOperations for the implementation to make this operation recoverable on crashes.</p>
+   * The split logic overloads the use of .clean files that
+   * LogCleaner typically uses to make the process of replacing the input segment with multiple new segments atomic and recoverable in the event of a crash.
+   * See replaceSegments and completeSwapOperations for the implementation to make this operation recoverable on crashes(碰撞，倒闭，破产).</p>
    *
    * @param segment Segment to split
    * @param existingSegments The existing segments of the log
@@ -762,8 +761,12 @@ object LocalLog extends Logging {
       var position = 0
       val sourceRecords = segment.log
 
+      // 怎么拆 拆几个？ 看offset能否转换为相对偏移量，最大值为Integer.MAX_VALUE
       while (position < sourceRecords.sizeInBytes) {
+        // 获取迭代器
         val firstBatch = sourceRecords.batchesFrom(position).asScala.head
+        //创建 Segment一套文件，并且创建以 firstBatch.baseOffset 为文件名 以 .cleaned 为后缀 的文件
+        // 例如：00000000000000000000.cleaned
         val newSegment = createNewCleanedSegment(dir, config, firstBatch.baseOffset)
         newSegments += newSegment
 
@@ -784,7 +787,7 @@ object LocalLog extends Logging {
       }
       // size of all the new segments combined must equal size of the original segment
       if (totalSizeOfNewSegments != segment.log.sizeInBytes)
-        throw new IllegalStateException("Inconsistent segment sizes after split" +
+        throw new IllegalStateException("Inconsistent(不一致的) segment sizes after split" +
           s" before: ${segment.log.sizeInBytes} after: $totalSizeOfNewSegments")
 
       // replace old segment with new ones
@@ -804,31 +807,29 @@ object LocalLog extends Logging {
   }
 
   /**
-   * Swap one or more new segment in place and delete one or more existing segments in a crash-safe
-   * manner. The old segments will be asynchronously deleted.
+   * Swap one or more new segment in place(在正确的位置，适当的) and delete one or more existing segments in a crash-safe manner.
+   * The old segments will be asynchronously deleted.
    *
    * This method does not need to convert IOException to KafkaStorageException because it is either
    * called before all logs are loaded or the caller will catch and handle IOException
    *
    * The sequence of operations is:
    *
-   * - Cleaner creates one or more new segments with suffix .cleaned and invokes replaceSegments() on
-   *   the Log instance. If broker crashes at this point, the clean-and-swap operation is aborted and
-   *   the .cleaned files are deleted on recovery in LogLoader.
-   * - New segments are renamed .swap. If the broker crashes before all segments were renamed to .swap, the
-   *   clean-and-swap operation is aborted - .cleaned as well as .swap files are deleted on recovery in
-   *   in LogLoader. We detect this situation by maintaining a specific order in which files are renamed
-   *   from .cleaned to .swap. Basically, files are renamed in descending order of offsets. On recovery,
-   *   all .swap files whose offset is greater than the minimum-offset .clean file are deleted.
+   * - Cleaner creates one or more new segments with suffix .cleaned and invokes replaceSegments() on the Log instance.
+   *   If broker crashes at this point, the clean-and-swap operation is aborted and the .cleaned files are deleted on recovery in LogLoader.
+   * - New segments are renamed .swap. If the broker crashes before all segments were renamed to .swap,
+   *   the clean-and-swap operation is aborted - .cleaned as well as(以及) .swap files are deleted on recovery in in LogLoader.
+   *   We detect this situation by maintaining a specific order in which files are renamed from .cleaned to .swap.
+   *   Basically, files are renamed in descending order of offsets. 基本上，文件是按偏移量降序重命名的。
+   *   On recovery, all .swap files whose offset is greater than the minimum-offset .clean file are deleted.
    * - If the broker crashes after all new segments were renamed to .swap, the operation is completed,
-   *   the swap operation is resumed on recovery as described in the next step.
-   * - Old segment files are renamed to .deleted and asynchronous delete is scheduled. If the broker
-   *   crashes, any .deleted files left behind are deleted on recovery in LogLoader.
-   *   replaceSegments() is then invoked to complete the swap with newSegment recreated from the
-   *   .swap file and oldSegments containing segments which were not renamed before the crash.
+   *   the swap operation is resumed(继续) on recovery as described in the next step.
+   * - Old segment files are renamed to .deleted and asynchronous delete is scheduled.
+   *   If the broker crashes, any .deleted files left behind(词组：遗留，留下) are deleted on recovery in LogLoader.
+   *   replaceSegments() is then invoked to complete the swap with newSegment recreated from the.swap file
+   *   and oldSegments containing segments which were not renamed before the crash.
    * - Swap segment(s) are renamed to replace the existing segments, completing this operation.
-   *   If the broker crashes, any .deleted files which may be left behind are deleted
-   *   on recovery in LogLoader.
+   *   If the broker crashes, any .deleted files which may be left behind are deleted on recovery in LogLoader.
    *
    * @param existingSegments The existing segments of the log
    * @param newSegments The new log segment to add to the log
@@ -851,10 +852,11 @@ object LocalLog extends Logging {
                                    logDirFailureChannel: LogDirFailureChannel,
                                    logPrefix: String,
                                    isRecoveredSwapFile: Boolean = false): Iterable[LogSegment] = {
+    //新创建的LogSegment按照 baseOffeset 排序,默认是升序的
     val sortedNewSegments = newSegments.sortBy(_.baseOffset)
-    // Some old segments may have been removed from index and scheduled for async deletion after the caller reads segments
-    // but before this method is executed. We want to filter out those segments to avoid calling deleteSegmentFiles()
-    // multiple times for the same segment.
+    // Some old segments may have been removed from index and scheduled for async deletion
+    // after the caller reads segments but before this method is executed.
+    // We want to filter out those segments to avoid calling deleteSegmentFiles() multiple times for the same segment.
     val sortedOldSegments = oldSegments.filter(seg => existingSegments.contains(seg.baseOffset)).sortBy(_.baseOffset)
 
     // need to do this in two phases to be crash safe AND do the delete asynchronously

@@ -143,12 +143,13 @@ class LogLoader(
 
     // Fourth pass: load all the log and index files.
     // We might encounter(遭遇，遇到) legacy(遗留的) log segments with offset overflow (KAFKA-6264). We need to split such segments. When
-    // this happens, restart loading segment files from scratch.
+    // this happens, restart loading segment files from scratch(词组：从零开始，从头开始).
     retryOnOffsetOverflow(() => {
       // In case we encounter a segment with offset overflow, the retry logic will split it after which we need to retry loading of segments.
       // In that case, we also need to close all segments that could have been left open in previous call to loadSegmentFiles().
       segments.close()
       segments.clear()
+      // 上边对log文件进行了重新操作，这里需要重新加载所有的Segment文件，保证最新
       loadSegmentFiles()
     })
 
@@ -183,14 +184,12 @@ class LogLoader(
     // The earliest leader epoch may not be flushed during a hard failure. Recover it here.
     leaderEpochCache.ifPresent(_.truncateFromStartAsyncFlush(logStartOffsetCheckpoint))
 
-    // Any segment loading or recovery code must not use producerStateManager, so that we can build the full state here
-    // from scratch.
+    // Any segment loading or recovery code must not use producerStateManager, so that we can build the full state here from scratch.
     if (!producerStateManager.isEmpty)
       throw new IllegalStateException("Producer state must be empty during log initialization")
 
-    // Reload all snapshots into the ProducerStateManager cache, the intermediate ProducerStateManager used
-    // during log recovery may have deleted some files without the LogLoader.producerStateManager instance witnessing the
-    // deletion.
+    // Reload all snapshots into the ProducerStateManager cache, the intermediate(中间的) ProducerStateManager used
+    // during log recovery may have deleted some files without the LogLoader.producerStateManager instance witnessing(见证) the deletion.
     producerStateManager.removeStraySnapshots(segments.baseOffsets)
     UnifiedLog.rebuildProducerState(
       producerStateManager,
@@ -316,7 +315,7 @@ class LogLoader(
         val offset = offsetFromFile(file)
         val logFile = LogFileUtils.logFile(dir, offset)
         if (!logFile.exists) {
-          warn(s"Found an orphaned index file ${file.getAbsolutePath}, with no corresponding log file.")
+          warn(s"Found an orphaned(孤儿) index file ${file.getAbsolutePath}, with no corresponding log file.")
           Files.deleteIfExists(file.toPath)
         }
       } else if (isLogFile(file)) {
@@ -341,7 +340,7 @@ class LogLoader(
                 s" ${segment.log.file.getAbsolutePath}, recovering segment and rebuilding index files...")
             recoverSegment(segment)
           case e: CorruptIndexException =>
-            warn(s"Found a corrupted index file corresponding to log file" +
+            warn(s"Found a corrupted(损坏的) index file corresponding to log file" +
               s" ${segment.log.file.getAbsolutePath} due to ${e.getMessage}}, recovering segment and" +
               " rebuilding index files...")
             recoverSegment(segment)
@@ -384,13 +383,11 @@ class LogLoader(
   }
 
   /**
-   * Recover the log segments (if there was an unclean shutdown). Ensures there is at least one
-   * active segment, and returns the updated recovery point and next offset after recovery. Along
-   * the way, the method suitably updates the LeaderEpochFileCache or ProducerStateManager inside
-   * the provided LogComponents.
+   * Recover the log segments (if there was an unclean shutdown).
+   * Ensures there is at least one active segment, and returns the updated recovery point and next offset after recovery.
+   * Along the way(沿途，一路上，在这个过程中), the method suitably updates the LeaderEpochFileCache or ProducerStateManager inside the provided LogComponents.
    *
-   * This method does not need to convert IOException to KafkaStorageException because it is only
-   * called before all logs are loaded.
+   * This method does not need to convert IOException to KafkaStorageException because it is only called before all logs are loaded.
    *
    * @return a tuple containing (newRecoveryPoint, nextOffset).
    *
@@ -417,6 +414,8 @@ class LogLoader(
 
     // If we have the clean shutdown marker, skip recovery.
     if (!hadCleanShutdown) {
+      // 找当前LogSegments中小于等于 recoveryPointCheckpoint 的最大值(相当于距离恢复点最近的一个LogSegment)，存在则返回subMap，从最近的LogSegment开始遍历
+      // 如果都小于recoveryPointCheckpoint，则从头开始遍历
       val unflushed = segments.values(recoveryPointCheckpoint, Long.MaxValue)
       val numUnflushed = unflushed.size
       val unflushedIter = unflushed.iterator
@@ -441,8 +440,7 @@ class LogLoader(
           }
         if (truncatedBytes > 0) {
           // we had an invalid message, delete all remaining log
-          warn(s"Corruption found in segment ${segment.baseOffset}," +
-            s" truncating to offset ${segment.readNextOffset}")
+          warn(s"Corruption found in segment ${segment.baseOffset}," + s" truncating to offset ${segment.readNextOffset}")
           val unflushedRemaining = new ArrayBuffer[LogSegment]
           unflushedIter.forEachRemaining(s => unflushedRemaining += s)
           removeAndDeleteSegmentsAsync(unflushedRemaining)
@@ -470,12 +468,13 @@ class LogLoader(
           config.preallocate))
     }
 
-    // Update the recovery point if there was a clean shutdown and did not perform any changes to
-    // the segment. Otherwise, we just ensure that the recovery point is not ahead of the log end
-    // offset. To ensure correctness and to make it easier to reason about, it's best to only advance
-    // the recovery point when the log is flushed. If we advanced the recovery point here, we could
-    // skip recovery for unflushed segments if the broker crashed after we checkpoint the recovery
-    // point and before we flush the segment.
+    // Update the recovery point if there was a clean shutdown and did not perform any changes to the segment.
+    // Otherwise, we just ensure that the recovery point is not ahead of the log end offset.
+    // To ensure correctness(正确性) and to make it easier to reason about,
+    // it's best to only advance the recovery point when the log is flushed.
+    // If we advanced the recovery point here,
+    // we could skip recovery for un flushed segments if the broker crashed
+    // after we checkpoint the recovery point and before we flush the segment.
     (hadCleanShutdown, logEndOffsetOption) match {
       case (true, Some(logEndOffset)) =>
         (logEndOffset, logEndOffset)

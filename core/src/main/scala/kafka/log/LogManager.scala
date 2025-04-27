@@ -329,6 +329,7 @@ class LogManager(logDirs: Seq[File],
                            topicConfigOverrides: Map[String, LogConfig],
                            numRemainingSegments: ConcurrentMap[String, Int],
                            isStray: UnifiedLog => Boolean): UnifiedLog = {
+    // 获取到主题和分区
     val topicPartition = UnifiedLog.parseTopicPartitionName(logDir)
     val config = topicConfigOverrides.getOrElse(topicPartition.topic, defaultConfig)
     val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
@@ -1394,7 +1395,7 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Delete any eligible logs. Return the number of segments deleted.
+   * Delete any eligible(合适的，合格的) logs. Return the number of segments deleted.
    * Only consider logs that are not compacted.
    */
   private def cleanupLogs(): Unit = {
@@ -1433,8 +1434,7 @@ class LogManager(logDirs: Seq[File],
       }
     }
 
-    debug(s"Log cleanup completed. $total files deleted in " +
-                  (time.milliseconds - startMs) / 1000 + " seconds")
+    debug(s"Log cleanup completed. $total files deleted in " + (time.milliseconds - startMs) / 1000 + " seconds")
   }
 
   /**

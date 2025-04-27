@@ -78,7 +78,8 @@ import scala.jdk.CollectionConverters._
  *                       The logStartOffset is used to decide the following:
  *                       - Log deletion. LogSegment whose nextOffset <= log's logStartOffset can be deleted.
  *                         It may trigger log rolling if the active segment is deleted.
- *                       - Earliest offset of the log in response to ListOffsetRequest. To avoid OffsetOutOfRange exception after user seeks to earliest offset,
+ *                       - Earliest offset of the log in response to ListOffsetRequest.
+ *                         To avoid OffsetOutOfRange exception after user seeks to earliest offset,
  *                         we make sure that logStartOffset <= log's highWatermark
  *                       Other activities such as log cleaning are not affected by logStartOffset.
  * @param localLog The LocalLog instance containing non-empty log segments recovered from disk
@@ -139,8 +140,9 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    */
   @volatile private var firstUnstableOffsetMetadata: Option[LogOffsetMetadata] = None
 
-  /* Keep track of the current high watermark in order to ensure that segments containing offsets at or above it are
-   * not eligible for deletion. This means that the active segment is only eligible for deletion if the high watermark
+  /* Keep track of the current high watermark in order to
+   * ensure that segments containing offsets at or above it are not eligible for deletion.
+   * This means that the active segment is only eligible for deletion if the high watermark
    * equals the log end offset (which may never happen for a partition under consistent load). This is needed to
    * prevent the log start offset (which is exposed in fetch responses) from getting ahead of the high watermark.
    */
@@ -170,6 +172,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
       }
     }
 
+    // 创建文件：partition.metadata
     initializePartitionMetadata()
     updateLogStartOffset(logStartOffset)
     updateLocalLogStartOffset(math.max(logStartOffset, localLog.segments.firstSegmentBaseOffset.orElse(0L)))
@@ -201,10 +204,10 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    * Initialize topic ID information for the log by maintaining the partition metadata file and setting the in-memory _topicId.
    * Delete partition metadata file if the version does not support topic IDs.
    * Set _topicId based on a few scenarios:
-   *   - Recover topic ID if present and topic IDs are supported. Ensure we do not try to assign a provided topicId that is inconsistent
-   *     with the ID on file.
-   *   - If we were provided a topic ID when creating the log, partition metadata files are supported, and one does not yet exist
-   *     set _topicId and write to the partition metadata file.
+   *   - Recover topic ID if present and topic IDs are supported.
+   *     Ensure we do not try to assign a provided topicId that is inconsistent(不一致的) with the ID on file.
+   *   - If we were provided a topic ID when creating the log, partition metadata files are supported,
+   *     and one does not yet exist set _topicId and write to the partition metadata file.
    *   - Otherwise set _topicId to None
    */
   private def initializeTopicId(): Unit =  {
@@ -1441,8 +1444,8 @@ class UnifiedLog(@volatile var logStartOffset: Long,
   }
 
   /**
-   * Delete any local log segments starting with the oldest segment and moving forward until until
-   * the user-supplied predicate is false or the segment containing the current high watermark is reached.
+   * Delete any local log segments starting with the oldest segment and moving forward
+   * until until the user-supplied predicate is false or the segment containing the current high watermark is reached.
    * We do not delete segments with offsets at or beyond the high watermark to ensure that the log start
    * offset can never exceed it. If the high watermark has not yet been initialized, no segments are eligible
    * for deletion.
@@ -1479,6 +1482,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    * @return the segments ready to be deleted
    */
   private[log] def deletableSegments(predicate: (LogSegment, Option[LogSegment]) => Boolean): Iterable[LogSegment] = {
+
     def isSegmentEligibleForDeletion(nextSegmentOpt: Option[LogSegment], upperBoundOffset: Long): Boolean = {
       val allowDeletionDueToLogStartOffsetIncremented = nextSegmentOpt.isDefined && logStartOffset >= nextSegmentOpt.get.baseOffset
       // Segments are eligible for deletion when:
@@ -1501,17 +1505,21 @@ class UnifiedLog(@volatile var logStartOffset: Long,
       var segmentOpt = nextOption(segmentsIterator)
       var shouldRoll = false
       while (segmentOpt.isDefined) {
+        // 这里用了双指针
+        // segmentOpt: 当前指针指向的segment
+        // nextSegmentOpt: 下一个指针指向的segment
+        // upperBoundOffset: 下一个指针指向的segment的baseOffset
         val segment = segmentOpt.get
         val nextSegmentOpt = nextOption(segmentsIterator)
         val isLastSegmentAndEmpty = nextSegmentOpt.isEmpty && segment.size == 0
         val upperBoundOffset = if (nextSegmentOpt.nonEmpty) nextSegmentOpt.get.baseOffset() else logEndOffset
-        // We don't delete segments with offsets at or beyond the high watermark to ensure that the log start
-        // offset can never exceed it.
+        // We don't delete segments with offsets at or beyond the high watermark to ensure that the log start offset can never exceed(超过) it.
         val predicateResult = highWatermark >= upperBoundOffset && predicate(segment, nextSegmentOpt)
 
-        // Roll the active segment when it breaches the configured retention policy. The rolled segment will be
-        // eligible for deletion and gets removed in the next iteration.
+        // Roll the active segment when it breaches(中断，中止，违背) the configured retention policy.
+        // The rolled segment will be eligible for deletion and gets removed in the next iteration.
         if (predicateResult && remoteLogEnabled() && nextSegmentOpt.isEmpty && segment.size > 0) {
+          // 说明到头了，需要roll一个新segment，否则删除的segment的baseOffset会和active segment的baseOffset相同，导致segment无法删除
           shouldRoll = true
         }
         if (predicateResult && !isLastSegmentAndEmpty && isSegmentEligibleForDeletion(nextSegmentOpt, upperBoundOffset)) {
@@ -1562,16 +1570,14 @@ class UnifiedLog(@volatile var logStartOffset: Long,
   }
 
   /**
-   * If topic deletion is enabled, delete any local log segments that have either expired due to time based retention
-   * or because the log size is > retentionSize.
+   * If topic deletion is enabled, delete any local log segments that
+   * have either expired due to time based retention(保留) or because the log size is > retentionSize.
    *
    * Whether or not deletion is enabled, delete any local log segments that are before the log start offset
    */
   def deleteOldSegments(): Int = {
     if (config.delete) {
-      deleteLogStartOffsetBreachedSegments() +
-        deleteRetentionSizeBreachedSegments() +
-        deleteRetentionMsBreachedSegments()
+      deleteLogStartOffsetBreachedSegments() + deleteRetentionSizeBreachedSegments() + deleteRetentionMsBreachedSegments()
     } else {
       deleteLogStartOffsetBreachedSegments()
     }
@@ -1606,6 +1612,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
   }
 
   private def deleteLogStartOffsetBreachedSegments(): Int = {
+
     def shouldDelete(segment: LogSegment, nextSegmentOpt: Option[LogSegment]): Boolean = {
       nextSegmentOpt.exists(_.baseOffset <= (if (remoteLogEnabled()) localLogStartOffset() else logStartOffset))
     }
@@ -2018,6 +2025,7 @@ object UnifiedLog extends Logging {
             logOffsetsListener: LogOffsetsListener = LogOffsetsListener.NO_OP_OFFSETS_LISTENER): UnifiedLog = {
     // create the log directory if it doesn't exist
     Files.createDirectories(dir.toPath)
+    //解析出主题和分区
     val topicPartition = UnifiedLog.parseTopicPartitionName(dir)
     val segments = new LogSegments(topicPartition)
     // The created leaderEpochCache will be truncated by LogLoader if necessary
@@ -2113,6 +2121,7 @@ object UnifiedLog extends Logging {
                               firstOffsetMetadata: Option[LogOffsetMetadata],
                               origin: AppendOrigin): Option[CompletedTxn] = {
     val producerId = batch.producerId
+    //创建ProducerAppendInfo
     val appendInfo = producers.getOrElseUpdate(producerId, producerStateManager.prepareUpdate(producerId, origin))
     val completedTxn = appendInfo.append(batch, firstOffsetMetadata.asJava).asScala
     // Whether we wrote a control marker or a data batch, we can remove VerificationGuard since either the transaction is complete or we have a first offset.
@@ -2192,8 +2201,7 @@ object UnifiedLog extends Logging {
 
   /**
    * Rebuilds producer state until the provided lastOffset. This function may be called from the
-   * recovery code path, and thus must be free of all side-effects, i.e. it must not update any
-   * log-specific state.
+   * recovery code path, and thus must be free of all side-effects, i.e. it must not update any log-specific state.
    *
    * @param producerStateManager    The ProducerStateManager instance to be rebuilt.
    * @param segments                The segments of the log whose producer state is being rebuilt
@@ -2223,40 +2231,42 @@ object UnifiedLog extends Logging {
       }
     info(s"${logPrefix}Loading producer state till offset $lastOffset with message format version ${recordVersion.value}")
 
-    // We want to avoid unnecessary scanning of the log to build the producer state when the broker is being
-    // upgraded. The basic idea is to use the absence of producer snapshot files to detect the upgrade case,
-    // but we have to be careful not to assume too much in the presence of broker failures. The two most common
-    // upgrade cases in which we expect to find no snapshots are the following:
+    // We want to avoid unnecessary scanning of the log to build the producer state when the broker is being upgraded.
+    // The basic idea is to use the absence(缺席，不存在) of producer snapshot files to detect the upgrade case,
+    // but we have to be careful not to assume(假设，认为) too much in the presence of(词组：在...面前) broker failures.
+    // The two most common upgrade cases in which we expect to find no snapshots are the following:
     //
     // 1. The broker has been upgraded, but the topic is still on the old message format.
     // 2. The broker has been upgraded, the topic is on the new message format, and we had a clean shutdown.
     //
-    // If we hit either of these cases, we skip producer state loading and write a new snapshot at the log end
-    // offset (see below). The next time the log is reloaded, we will load producer state using this snapshot
-    // (or later snapshots). Otherwise, if there is no snapshot file, then we have to rebuild producer state
-    // from the first segment.
+    // If we hit either of these cases, we skip producer state loading and write a new snapshot at the log end offset (see below(见下方)).
+    // The next time the log is reloaded, we will load producer state using this snapshot (or later snapshots).
+    // Otherwise, if there is no snapshot file, then we have to rebuild producer state from the first segment.
     if (recordVersion.value < RecordBatch.MAGIC_VALUE_V2 ||
-      (!producerStateManager.latestSnapshotOffset.isPresent && reloadFromCleanShutdown)) {
-      // To avoid an expensive scan through all of the segments, we take empty snapshots from the start of the
-      // last two segments and the last offset. This should avoid the full scan in the case that the log needs
-      // truncation.
+      (!producerStateManager.latestSnapshotOffset.isPresent && reloadFromCleanShutdown)) {//相当于没快照的时候直接打快照
+      // To avoid an expensive scan through all of the segments,
+      // we take empty snapshots from the start of the last two segments and the last offset.
+      // This should avoid the full scan in the case that the log needs truncation.
       offsetsToSnapshot.flatten.foreach { offset =>
         producerStateManager.updateMapEndOffset(offset)
+        // lastMapOffset > lastSnapOffset 打快照
         producerStateManager.takeSnapshot()
       }
     } else {
       info(s"${logPrefix}Reloading from producer snapshot and rebuilding producer state from offset $lastOffset")
+      // 日志截断之前没有活跃的生产者并且所有事物都已经同步到ISR && 生产者状态管理器加载的最新偏移量已经覆盖了lastOffset即当前Segment已经被加载了
       val isEmptyBeforeTruncation = producerStateManager.isEmpty && producerStateManager.mapEndOffset >= lastOffset
       val producerStateLoadStart = time.milliseconds()
       producerStateManager.truncateAndReload(logStartOffset, lastOffset, time.milliseconds())
+
       val segmentRecoveryStart = time.milliseconds()
 
-      // Only do the potentially expensive reloading if the last snapshot offset is lower than the log end
-      // offset (which would be the case on first startup) and there were active producers prior to truncation
-      // (which could be the case if truncating after initial loading). If there weren't, then truncating
-      // shouldn't change that fact (although it could cause a producerId to expire earlier than expected),
-      // and we can skip the loading. This is an optimization for users which are not yet using
-      // idempotent/transactional features yet.
+      // Only do the potentially(潜在的) expensive reloading
+      // if the last snapshot offset is lower than the log end offset (which would be the case on first startup)
+      // and there were active producers prior(先前的) to truncation (which could be the case if truncating after initial loading).
+      // If there weren't, then truncating shouldn't change that fact
+      // (although it could cause a producerId to expire earlier than expected), and we can skip the loading.
+      // This is an optimization for users which are not yet using idempotent(幂等性)/transactional features yet.
       if (lastOffset > producerStateManager.mapEndOffset && !isEmptyBeforeTruncation) {
         val segmentOfLastOffset = segments.floorSegment(lastOffset)
 

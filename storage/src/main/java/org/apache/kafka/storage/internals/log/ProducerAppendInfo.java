@@ -38,9 +38,9 @@ import java.util.OptionalLong;
 
 /**
  * This class is used to validate the records appended by a given producer before they are written to the log.
- * It is initialized with the producer's state after the last successful append, and transitively validates the
- * sequence numbers and epochs of each new record. Additionally, this class accumulates transaction metadata
- * as the incoming records are validated.
+ * It is initialized with the producer's state after the last successful append,
+ * and transitively validates the sequence numbers and epochs of each new record.
+ * Additionally, this class accumulates transaction metadata as the incoming records are validated.
  */
 public class ProducerAppendInfo {
     private static final Logger log = LoggerFactory.getLogger(ProducerAppendInfo.class);
@@ -58,14 +58,15 @@ public class ProducerAppendInfo {
      *
      * @param topicPartition         topic partition
      * @param producerId             The id of the producer appending to the log
-     * @param currentEntry           The current entry associated with the producer id which contains metadata for a fixed number of
-     *                               the most recent appends made by the producer. Validation of the first incoming append will
-     *                               be made against the latest append in the current entry. New appends will replace older appends
-     *                               in the current entry so that the space overhead is constant.
-     * @param origin                 Indicates the origin of the append which implies the extent of validation. For example, offset
-     *                               commits, which originate from the group coordinator, do not have sequence numbers and therefore
-     *                               only producer epoch validation is done. Appends which come through replication are not validated
-     *                               (we assume the validation has already been done) and appends from clients require full validation.
+     * @param currentEntry           The current entry associated with(词组：与...有关) the producer id which
+     *                               contains metadata for a fixed number of the most recent appends made by the producer. *包含生产者最近添加的固定数量的元数据。
+     *                               Validation of the first incoming append will be made against the latest append in the current entry.
+     *                               New appends will replace older appends in the current entry so that(因此) the space overhead(开销) is constant.
+     * @param origin                 Indicates the origin of the append which implies the extent of validation.
+     *                               For example, offset commits, which originate(起源) from the group coordinator, do not have sequence numbers
+     *                               and therefore only producer epoch validation is done.
+     *                               Appends which come through replication are not validated (we assume the validation has already been done)
+     *                               and appends from clients require full validation.
      * @param verificationStateEntry The most recent entry used for verification if no append has been completed yet otherwise null
      */
     public ProducerAppendInfo(TopicPartition topicPartition,

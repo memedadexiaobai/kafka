@@ -52,6 +52,53 @@ public class LogSegments {
      *  2.范围查询：如果你的应用需要频繁地进行范围查询（例如，查找某个键范围内的所有条目），ConcurrentNavigableMap 提供的导航方法可以显著提高查询效率。
      *  3.动态排序：在需要动态排序的场景中，ConcurrentNavigableMap 可以高效地插入和删除条目，同时保持映射的有序性。
      *  4.缓存和索引：在构建缓存或索引时，ConcurrentNavigableMap 可以提供高效的并发访问和有序性，适用于需要快速查找和更新的场景
+     *
+     * 常用方法
+     *  put(K key, V value) 插入键值对。如果键已经存在，则替换旧值。
+     *  get(Object key) 获取指定键的值。如果键不存在，返回 null。
+     *  remove(Object key) 删除指定键的键值对。如果键不存在，不执行任何操作。
+     *  containsKey(Object key) 检查映射是否包含指定的键。
+     *  size() 返回映射中的键值对数量。
+     *  isEmpty() 检查映射是否为空。
+     *  firstKey() 和 lastKey() 分别返回映射中的第一个（最小）键和最后一个（最大）键。
+     *  higherKey(K key) 和 lowerKey(K key) 分别返回大于和小于指定键的最小键和最大键。
+     *  ceilingKey(K key) 和 floorKey(K key) 分别返回大于或等于和小于或等于指定键的最小键和最大键。
+     *  subMap(K fromKey, K toKey) 返回一个子映射，包含从 fromKey（包含）到 toKey（不包含）之间的所有键值对。
+     *  headMap(K toKey) 和 tailMap(K fromKey) 分别返回从映射的开始到 toKey（不包含）和从 fromKey（包含）到映射的结束的子映射。
+     *  descendingMap() 返回一个逆序的视图，键值对按降序排列。
+     *
+     * 示例代码
+     * public class ConcurrentNavigableMapExample {
+     *     public static void main(String[] args) {
+     *         ConcurrentNavigableMap<String, Integer> map = new ConcurrentSkipListMap<>();
+     *
+     *         map.put("apple", 1);
+     *         map.put("banana", 2);
+     *         map.put("cherry", 3);
+     *
+     *         System.out.println("Size: " + map.size()); // 输出: Size: 3
+     *         System.out.println("First Key: " + map.firstKey()); // 输出: First Key: apple
+     *         System.out.println("Last Key: " + map.lastKey()); // 输出: Last Key: cherry
+     *
+     *         System.out.println("Higher Key of 'banana': " + map.higherKey("banana")); // 输出: Higher Key of 'banana': cherry
+     *         System.out.println("Lower Key of 'cherry': " + map.lowerKey("cherry")); // 输出: Lower Key of 'cherry': banana
+     *
+     *         System.out.println("Ceiling Key of 'banana': " + map.ceilingKey("banana")); // 输出: Ceiling Key of 'banana': banana
+     *         System.out.println("Floor Key of 'banana': " + map.floorKey("banana")); // 输出: Floor Key of 'banana': banana
+     *
+     *         ConcurrentNavigableMap<String, Integer> subMap = map.subMap("apple", "cherry");
+     *         System.out.println("Sub Map: " + subMap); // 输出: Sub Map: {apple=1, banana=2}
+     *
+     *         ConcurrentNavigableMap<String, Integer> headMap = map.headMap("banana");
+     *         System.out.println("Head Map: " + headMap); // 输出: Head Map: {apple=1}
+     *
+     *         ConcurrentNavigableMap<String, Integer> tailMap = map.tailMap("banana");
+     *         System.out.println("Tail Map: " + tailMap); // 输出: Tail Map: {banana=2, cherry=3}
+     *
+     *         ConcurrentNavigableMap<String, Integer> descendingMap = map.descendingMap();
+     *         System.out.println("Descending Map: " + descendingMap); // 输出: Descending Map: {cherry=3, banana=2, apple=1}
+     *     }
+     * }
      */
     private final ConcurrentNavigableMap<Long, LogSegment> segments = new ConcurrentSkipListMap<>();
 
@@ -191,8 +238,9 @@ public class LogSegments {
     }
 
     /**
-     * @return An iterator to all segments beginning with the segment that includes "from" and ending
-     *         with the segment that includes up to "to-1" or the end of the log (if to > end of log).
+     * @return An iterator to all segments
+     * beginning with the segment that includes "from"
+     * and ending with the segment that includes up to(达到，接近于) "to-1" or the end of the log (if to > end of log).
      */
     public Collection<LogSegment> values(long from, long to) {
         if (from == to) {
@@ -202,6 +250,7 @@ public class LogSegments {
             throw new IllegalArgumentException("Invalid log segment range: requested segments in " + topicPartition +
                     " from offset " + from + " which is greater than limit offset " + to);
         } else {
+            // 小于或者等于 from 的最大值
             Long floor = segments.floorKey(from);
             if (floor != null)
                 return segments.subMap(floor, to).values();
@@ -248,7 +297,7 @@ public class LogSegments {
     }
 
     /**
-     * Return the log segment with the greatest offset strictly less than the given offset,
+     * Return the log segment with the greatest offset strictly(严格的，只) less than the given offset,
      * if it exists.
      *
      * This method is thread-safe.

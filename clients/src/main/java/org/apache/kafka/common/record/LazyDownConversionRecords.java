@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Encapsulation for holding records that require down-conversion in a lazy, chunked manner (KIP-283). See
+ * Encapsulation(封装，密封) for holding records that require down-conversion in a lazy, chunked manner (KIP-283). See
  * {@link LazyDownConversionRecordsSend} for the actual chunked send implementation.
  */
 public class LazyDownConversionRecords implements BaseRecords {

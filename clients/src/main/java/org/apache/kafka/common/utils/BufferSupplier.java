@@ -92,7 +92,7 @@ public abstract class BufferSupplier implements AutoCloseable {
 
     /**
      * Simple buffer supplier for single-threaded usage. It caches a single buffer, which grows
-     * monotonically as needed to fulfill the allocation request.
+     * monotonically(单调的) as needed(根据需要) to fulfill(完成，达到) the allocation request.
      */
     public static class GrowableBufferSupplier extends BufferSupplier {
         private ByteBuffer cachedBuffer;

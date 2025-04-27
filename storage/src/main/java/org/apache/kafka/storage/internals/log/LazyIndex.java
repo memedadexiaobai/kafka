@@ -27,14 +27,12 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * A wrapper over an `AbstractIndex` instance that provides a mechanism to defer loading
- * (i.e. memory mapping) the underlying index until it is accessed for the first time via the
- * `get` method.
+ * A wrapper over an `AbstractIndex` instance that provides a mechanism to defer(推迟) loading
+ * (i.e. memory mapping) the underlying index until it is accessed for the first time via the `get` method.
  *
- * In addition, this class exposes(暴露) a number of methods (e.g. updateParentDir, renameTo, close,
- * etc.) that provide the desired behavior without causing the index to be loaded. If the index
- * had previously been loaded, the methods in this class simply delegate to the relevant method in
- * the index.
+ * In addition, this class exposes(暴露) a number of methods (e.g. updateParentDir, renameTo, close, etc.)
+ * that provide the desired behavior without causing the index to be loaded.
+ * If the index had previously been loaded, the methods in this class simply delegate to the relevant(相关的) method in the index.
  *
  * This is an important optimization with regards to broker start-up and shutdown time if it has a
  * large number of segments.

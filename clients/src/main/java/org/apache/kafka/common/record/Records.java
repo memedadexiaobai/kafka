@@ -28,7 +28,7 @@ import java.util.Optional;
  * batches (see {@link RecordBatch}).
  *
  * For magic versions 1 and below, each batch consists of an 8 byte offset, a 4 byte record size, and a "shallow" {@link Record record}.
- * If the batch is not compressed, then each batch will have only the shallow record contained inside it.
+ * If the batch is not compressed, then each batch will have only the shallow(浅的) record contained inside it.
  * If it is compressed, the batch contains "deep" records, which are packed into the value field of the shallow(浅的) record.
  * To iterate over the shallow batches, use {@link Records#batches()}; for the deep records, use {@link Records#records()}.
  * Note that the deep iterator handles both compressed and non-compressed batches:
@@ -49,8 +49,8 @@ public interface Records extends TransferableRecords {
     int SIZE_LENGTH = 4;
     int LOG_OVERHEAD = SIZE_OFFSET + SIZE_LENGTH;
 
-    // The magic offset is at the same offset for all current message formats, but the 4 bytes
-    // between the size and the magic is dependent on the version.
+    // The magic offset is at the same offset for all current message formats,
+    // but the 4 bytes between the size and the magic is dependent on the version.
     int MAGIC_OFFSET = LOG_OVERHEAD + 4;
     int MAGIC_LENGTH = 1;
     int HEADER_SIZE_UP_TO_MAGIC = MAGIC_OFFSET + MAGIC_LENGTH;

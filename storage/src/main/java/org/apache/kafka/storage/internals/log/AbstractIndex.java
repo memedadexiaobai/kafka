@@ -454,7 +454,8 @@ public abstract class AbstractIndex implements Closeable {
     }
 
     /**
-     * Round a number to the greatest exact multiple of the given factor less than the given number.
+     * Round(圆形的，整数的) a number to the greatest exact(准确的) multiple(倍数) of the given factor(因子，因素) less than the given number.
+     * 将一个数字四舍五入到小于给定数字的给定因子的最大精确倍数。
      * E.g. roundDownToExactMultiple(67, 8) == 64
      */
     private static int roundDownToExactMultiple(int number, int factor) {

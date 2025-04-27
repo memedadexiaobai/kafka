@@ -64,8 +64,9 @@ import java.util.stream.Stream;
  * <p>
  * As long as(只要，与...一样长) a producer id is contained in the map, the corresponding producer can continue to write data.
  * However, producer ids can be expired due to lack(缺乏) of recent use or if the last written entry has been deleted from
- * the log (e.g. if the retention policy is "delete"). For compacted topics, the log cleaner will ensure
- * that the most recent entry from a given producer id is retained in the log provided it hasn't expired due to age.
+ * the log (e.g. if the retention policy is "delete").
+ * For compacted topics, the log cleaner will ensure that the most recent entry from a given producer id is retained
+ * in the log provided it hasn't expired due to age.
  * This ensures that producer ids will not be expired until either the max expiration time has been reached,
  * or if the topic also is configured for deletion, the segment containing the last written offset has been deleted.
  */
@@ -115,10 +116,16 @@ public class ProducerStateManager {
 
     private final Map<Long, VerificationStateEntry> verificationStates = new HashMap<>();
 
-    // ongoing transactions sorted by the first offset of the transaction
+    // ongoing(持续存在的) transactions sorted by the first offset of the transaction
+    // 作用场景：ongoingTxns 用于存储当前正在进行中的事务的元数据。这些事务可能已经开始，但尚未完成提交或回滚。
+    //具体用途：事务协调器使用 ongoingTxns 来跟踪和管理正在进行中的事务。当事务开始时，相关的信息会被添加到 ongoingTxns 中。
+    // 事务协调器会根据事务的状态变化（如准备提交、准备回滚等），更新 ongoingTxns 中的记录。一旦事务完成（提交或回滚），相关的条目会被从 ongoingTxns 中移除。
     private final TreeMap<Long, TxnMetadata> ongoingTxns = new TreeMap<>();
 
     // completed transactions whose markers are at offsets above the high watermark
+    // 作用场景：unreplicatedTxns 用于存储尚未完全复制到所有同步副本（ISR）的事务元数据。这些事务可能还在进行中，或者其结果尚未完全确认。
+    // 具体用途：当事务协调器（Transaction Coordinator）收到事务提交或回滚请求时，它会先将事务的相关信息存储在 unreplicatedTxns 中，
+    // 直到这些事务的结果（提交或回滚）被成功复制到所有同步副本。这种机制确保了事务的持久性和可靠性，即使在Broker故障的情况下，未复制的事务信息也不会丢失。
     private final TreeMap<Long, TxnMetadata> unreplicatedTxns = new TreeMap<>();
 
     private volatile File logDir;
@@ -220,12 +227,12 @@ public class ProducerStateManager {
     }
 
     /**
-     * Scans the log directory, gathering all producer state snapshot files. Snapshot files which do not have an offset
-     * corresponding to one of the provided offsets in segmentBaseOffsets will be removed, except in the case that there
-     * is a snapshot file at a higher offset than any offset in segmentBaseOffsets.
+     * Scans the log directory, gathering(聚集) all producer state snapshot files.
+     * Snapshot files which do not have an offset corresponding to one of the provided offsets in segmentBaseOffsets will be removed,
+     * except in the case that there is a snapshot file at a higher offset than any offset in segmentBaseOffsets.
      * <p>
-     * The goal here is to remove any snapshot files which do not have an associated segment file, but not to remove the
-     * largest stray snapshot file which was emitted during clean shutdown.
+     * The goal here is to remove any snapshot files which do not have an associated segment file,
+     * but not to remove the largest stray(偏离的) snapshot file which was emitted(发出的) during clean shutdown.
      */
     public void removeStraySnapshots(Collection<Long> segmentBaseOffsets) throws IOException {
         OptionalLong maxSegmentBaseOffset = segmentBaseOffsets.isEmpty() ? OptionalLong.empty() : OptionalLong.of(segmentBaseOffsets.stream().max(Long::compare).get());
@@ -373,16 +380,18 @@ public class ProducerStateManager {
     }
 
     /**
-     * Truncate the producer id mapping to the given offset range and reload the entries from the most recent
-     * snapshot in range (if there is one). We delete snapshot files prior to the logStartOffset but do not remove
-     * producer state from the map. This means that in-memory and on-disk state can diverge, and in the case of
-     * broker failover or unclean shutdown, any in-memory state not persisted in the snapshots will be lost, which
-     * would lead to UNKNOWN_PRODUCER_ID errors. Note that the log end offset is assumed to be less than or equal
-     * to the high watermark.
+     * Truncate(截断) the producer id mapping to the given offset range and reload the entries from the most recent snapshot in range (if there is one).
+     * We delete snapshot files prior to the logStartOffset but do not remove producer state from the map.
+     * This means that in-memory and on-disk state can diverge(分歧，背离),
+     * and in the case of broker failover or unclean shutdown, any in-memory state not persisted in the snapshots will be lost,
+     * which would lead to UNKNOWN_PRODUCER_ID errors.
+     * Note that the log end offset is assumed to be less than or equal to the high watermark.
      */
     public void truncateAndReload(long logStartOffset, long logEndOffset, long currentTimeMs) throws IOException {
         // remove all out of range snapshots
         for (SnapshotFile snapshot : snapshots.values()) {
+            // logStartOffset代表当前CheckPoint的offset，该值说明之前的已经打checkpoint了，可以直接删除
+            // logEndOffset代表待恢复的Segment的baseOffset，大于该值，直接删除，因为当前在恢复这个Segment，需要重新构建
             if (snapshot.offset > logEndOffset || snapshot.offset <= logStartOffset) {
                 removeAndDeleteSnapshot(snapshot.offset);
             }
@@ -394,7 +403,7 @@ public class ProducerStateManager {
             updateOldestTxnTimestamp();
 
             // since we assume that the offset is less than or equal to the high watermark, it is
-            // safe to clear the unreplicated transactions
+            // safe to clear the un replicated(复制) transactions
             unreplicatedTxns.clear();
             loadFromSnapshot(logStartOffset, currentTimeMs);
         } else {
@@ -512,8 +521,7 @@ public class ProducerStateManager {
     }
 
     /**
-     * Remove any unreplicated transactions lower than the provided logStartOffset and bring the lastMapOffset forward
-     * if necessary.
+     * Remove any un replicated(复制) transactions lower than the provided logStartOffset and bring the lastMapOffset forward if necessary.
      */
     public void onLogStartOffsetIncremented(long logStartOffset) {
         removeUnreplicatedTransactions(logStartOffset);
