@@ -53,6 +53,7 @@ class KafkaRaftServer(
 ) extends Server with Logging {
 
   this.logIdent = s"[KafkaRaftServer nodeId=${config.nodeId}] "
+
   KafkaMetricsReporter.startReporters(VerifiableProperties(config.originals))
   KafkaYammerMetrics.INSTANCE.configure(config.originals)
 
@@ -92,12 +93,16 @@ class KafkaRaftServer(
   }
 
   override def startup(): Unit = {
+    // 监控相关
     Mx4jLoader.maybeLoad()
     // Controller component must be started before the broker component so that
     // the controller endpoints are passed to the KRaft manager
     controller.foreach(_.startup())
+
     broker.foreach(_.startup())
+
     AppInfoParser.registerAppInfo(Server.MetricsPrefix, config.brokerId.toString, metrics, time.milliseconds())
+
     info(KafkaBroker.STARTED_MESSAGE)
   }
 
@@ -124,7 +129,7 @@ object KafkaRaftServer {
   /**
    * Initialize the configured log directories, including both [[KRaftConfigs.MetadataLogDirProp]]
    * and [[KafkaConfig.LOG_DIR_PROP]]. This method performs basic validation to ensure that all
-   * directories are accessible and have been initialized with consistent `meta.properties`.
+   * directories are accessible and have been initialized with consistent(一致的) `meta.properties`.
    *
    * @param config The process configuration
    * @return A tuple containing the loaded meta properties (which are guaranteed to

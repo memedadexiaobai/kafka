@@ -101,13 +101,17 @@ class SharedServer(
   val bootstrapServers: JCollection[InetSocketAddress],
   val faultHandlerFactory: FaultHandlerFactory
 ) extends Logging {
+
   private val logContext: LogContext = new LogContext(s"[SharedServer id=${sharedServerConfig.nodeId}] ")
   this.logIdent = logContext.logPrefix
+
   private var started = false
   private var usedByBroker: Boolean = false
   private var usedByController: Boolean = false
+
   val brokerConfig = new KafkaConfig(sharedServerConfig.props, false)
   val controllerConfig = new KafkaConfig(sharedServerConfig.props, false)
+
   @volatile var metrics: Metrics = _metrics
   @volatile var raftManager: KafkaRaftManager[ApiMessageAndVersion] = _
   @volatile var brokerMetrics: BrokerServerMetrics = _

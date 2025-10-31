@@ -96,8 +96,7 @@ public class BootstrapDirectory {
 
     BootstrapMetadata readFromBinaryFile(String binaryPath) throws Exception {
         List<ApiMessageAndVersion> records = new ArrayList<>();
-        try (BatchFileReader reader = new BatchFileReader.Builder().
-                setPath(binaryPath).build()) {
+        try (BatchFileReader reader = new BatchFileReader.Builder().setPath(binaryPath).build()) {
             while (reader.hasNext()) {
                 BatchAndType batchAndType = reader.next();
                 if (!batchAndType.isControl()) {
