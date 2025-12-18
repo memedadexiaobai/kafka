@@ -229,6 +229,7 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
     thread.start()
     zkClient.registerStateChangeHandler(ZkStateChangeHandler)
     zkClient.registerZNodeChangeHandlerAndCheckExistence(FeatureZNodeChangeHandler)
+    // /feature 节点
     val ensureCacheUpdateOnce = new FeatureCacheUpdater(FeatureZNodeChangeHandler.path, Some(new CountDownLatch(1)))
     //thread:ChangeNotificationProcessorThread启动后会读取queue去处理，这里相当于放进去了一个任务
     queue.add(ensureCacheUpdateOnce)

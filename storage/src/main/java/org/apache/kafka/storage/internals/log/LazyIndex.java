@@ -32,7 +32,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * In addition, this class exposes(暴露) a number of methods (e.g. updateParentDir, renameTo, close, etc.)
  * that provide the desired behavior without causing the index to be loaded.
- * If the index had previously been loaded, the methods in this class simply delegate to the relevant(相关的) method in the index.
+ * If the index had previously been loaded, the methods in this class simply delegate(委托) to the relevant(相关的) method in the index.
  *
  * This is an important optimization with regards to broker start-up and shutdown time if it has a
  * large number of segments.

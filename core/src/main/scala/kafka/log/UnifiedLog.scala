@@ -57,17 +57,21 @@ import scala.compat.java8.OptionConverters._
 import scala.jdk.CollectionConverters._
 
 /**
- * A log which presents a unified view of local and tiered(...层的，分层的) log segments.
+ * A log which presents a unified(统一的) view of local and tiered(...层的，分层的) log segments.
  *
- * The log consists of tiered and local segments with the tiered portion of the log being optional.
+ * The log consists of tiered and local segments with the tiered portion(部分) of the log being optional.
+ * 日志由分层和本地段组成，日志的分层部分是可选的。
  * There could be an overlap(重叠) between the tiered and local segments.
- * The active segment is always guaranteed to be local.
- * If tiered segments are present, they always appear at the beginning of the log,
- *  followed by an optional region of overlap,
- *  followed by the local segments including the active segment.
+ * The active segment is always guaranteed(保证、承诺) to be local.
+ * If tiered segments are present, they always appear at the beginning of the log, 如果存在分层段，它们总是出现在日志的开头，
+ *  followed by an optional region of overlap, 随后是可选的重叠区域，
+ *  followed by the local segments including the active segment. 随后是包括活动段的局部段。
  *
- * NOTE: this class handles state and behavior specific to tiered segments as well as any behavior combining both tiered
- * and local segments. The state and behavior specific to local segments are handled by the encapsulated LocalLog instance.
+ * NOTE:
+ * this class handles state and behavior specific to tiered segments as well as any behavior combining both tiered and local segments.
+ * 此类处理特定于分层段的状态和行为，以及结合分层段和本地段的任何行为。
+ * The state and behavior specific to local segments are handled by the encapsulated(封装的) LocalLog instance.
+ * 特定于本地段的状态和行为由封装的LocalLog实例处理。
  *
  * @param logStartOffset The earliest offset allowed to be exposed to kafka client.
  *                       The logStartOffset can be updated by :
@@ -290,8 +294,18 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    * Update high watermark with offset metadata. The new high watermark will be lower
    * bounded by the log start offset and upper bounded by the log end offset.
    *
+   * updateHighWatermark = “HW 安全钳”：
+   *  小于起始抬到起始，大于末尾降到末尾，中间原样放行；
+   *  刷新内存后返回新 HW，保证消费者、副本、事务管理器都看到一条
+   *  “不越界、可重定位、线程安全”的高水位线。
+   *
    * @param highWatermarkMetadata the suggested high watermark with offset metadata
    * @return the updated high watermark offset
+   *
+   *         钳位区间
+   *   ├─logStartOffset......LEO┤
+   *    ↑        ↑        ↑
+   *   下限    合法      上限
    */
   def updateHighWatermark(highWatermarkMetadata: LogOffsetMetadata): Long = {
     val endOffsetMetadata = localLog.logEndOffsetMetadata
@@ -1486,7 +1500,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
     def isSegmentEligibleForDeletion(nextSegmentOpt: Option[LogSegment], upperBoundOffset: Long): Boolean = {
       val allowDeletionDueToLogStartOffsetIncremented = nextSegmentOpt.isDefined && logStartOffset >= nextSegmentOpt.get.baseOffset
       // Segments are eligible for deletion when:
-      //    1. they are uploaded to the remote storage
+      //    1. they are uploaded(上传) to the remote storage
       //    2. log-start-offset was incremented higher than the largest offset in the candidate segment
       // Note: when remote log copy is disabled, we will fall back to local log check using retention.ms/bytes
       if (remoteLogEnabledAndRemoteCopyEnabled()) {
@@ -1513,7 +1527,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
         val nextSegmentOpt = nextOption(segmentsIterator)
         val isLastSegmentAndEmpty = nextSegmentOpt.isEmpty && segment.size == 0
         val upperBoundOffset = if (nextSegmentOpt.nonEmpty) nextSegmentOpt.get.baseOffset() else logEndOffset
-        // We don't delete segments with offsets at or beyond the high watermark to ensure that the log start offset can never exceed(超过) it.
+        // We don't delete segments with offsets at or beyond(超过) the high watermark to ensure that the log start offset can never exceed(超过) it.
         val predicateResult = highWatermark >= upperBoundOffset && predicate(segment, nextSegmentOpt)
 
         // Roll the active segment when it breaches(中断，中止，违背) the configured retention policy.
@@ -1595,6 +1609,25 @@ class UnifiedLog(@volatile var logStartOffset: Long,
     deleteOldSegments(shouldDelete, RetentionMsBreach(this, remoteLogEnabledAndRemoteCopyEnabled()))
   }
 
+  /**
+   * retentionSize 是 本地磁盘允许保留的最大字节数（含段头、索引等全部文件）。
+   * size 是当前 所有本地段的总物理大小。
+   * 只要 size > retentionSize 就要 删最老的段，直到 剩余大小 ≤ retentionSize。
+   *
+   * 假设
+   *  retentionSize = 1000 MB
+   *  size = 1500 MB → diff = 500 MB
+   *
+   * | 老段序号  | 大小     | 累加已删   | diff 剩余     | 是否删除    |
+   * | -----   | ------ | ------ | ----------- | ------- |
+   * | seg-0   | 200 MB | 200 MB | 300 MB      | ✅       |
+   * | seg-1   | 250 MB | 450 MB | 50 MB       | ✅       |
+   * | seg-2   | 300 MB | ——     | **-250 MB** | ❌（停在这里） |
+   * 结果：
+   * 总删 450 MB，剩余 1050 MB ≤ 1000 MB 吗？ 否，但 再删就砍过头了，所以 seg-2 及以后全部保留。
+   * 实际代码里 允许稍微超一点，但 绝不“过度删除”，保证 本地占用 ≤ retentionSize
+   * @return
+   */
   private def deleteRetentionSizeBreachedSegments(): Int = {
     val retentionSize: Long = localRetentionSize(config, remoteLogEnabledAndRemoteCopyEnabled())
     if (retentionSize < 0 || size < retentionSize) return 0
@@ -1707,14 +1740,14 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    */
   def roll(expectedNextOffset: Option[Long] = None): LogSegment = lock synchronized {
     val newSegment = localLog.roll(expectedNextOffset)
-    // Take a snapshot of the producer state to facilitate recovery. It is useful to have the snapshot
-    // offset align with the new segment offset since this ensures we can recover the segment by beginning
-    // with the corresponding snapshot file and scanning the segment data. Because the segment base offset
-    // may actually be ahead of the current producer state end offset (which corresponds to the log end offset),
-    // we manually override the state offset here prior to taking the snapshot.
+    // Take a snapshot of the producer state to facilitate(促进) recovery.
+    // It is useful to have the snapshot offset align with(对齐) the new segment offset
+    // since this ensures we can recover the segment by beginning with the corresponding snapshot file and scanning the segment data.
+    // Because the segment base offset may actually be ahead of(领先) the current producer state end offset (which corresponds to the log end offset),
+    // we manually override the state offset here prior to(之前) taking the snapshot.
     producerStateManager.updateMapEndOffset(newSegment.baseOffset)
-    // We avoid potentially-costly fsync call, since we acquire UnifiedLog#lock here
-    // which could block subsequent produces in the meantime.
+    // We avoid potentially-costly fsync call,
+    // since we acquire UnifiedLog#lock here which could block subsequent produces in the meantime.
     // flush is done in the scheduler thread along with segment flushing below
     val maybeSnapshot = producerStateManager.takeSnapshot(false)
     updateHighWatermarkWithLogEndOffset()
@@ -1972,22 +2005,23 @@ class UnifiedLog(@volatile var logStartOffset: Long,
 }
 
 object UnifiedLog extends Logging {
+  // .log
   val LogFileSuffix: String = LogFileUtils.LOG_FILE_SUFFIX
-
+  // .index
   val IndexFileSuffix: String = LogFileUtils.INDEX_FILE_SUFFIX
-
+  // .timeindex
   val TimeIndexFileSuffix: String = LogFileUtils.TIME_INDEX_FILE_SUFFIX
-
+  // .txnindex
   val TxnIndexFileSuffix: String = LogFileUtils.TXN_INDEX_FILE_SUFFIX
-
+  // .cleaned
   val CleanedFileSuffix: String = LocalLog.CleanedFileSuffix
-
+  // .swap
   val SwapFileSuffix: String = LocalLog.SwapFileSuffix
-
+  // -delete
   val DeleteDirSuffix: String = LocalLog.DeleteDirSuffix
-
+  // -stray
   val StrayDirSuffix: String = LocalLog.StrayDirSuffix
-
+  // -future
   val FutureDirSuffix: String = LocalLog.FutureDirSuffix
 
   private[log] val DeleteDirPattern = LocalLog.DeleteDirPattern
@@ -2030,7 +2064,8 @@ object UnifiedLog extends Logging {
     val segments = new LogSegments(topicPartition)
     // The created leaderEpochCache will be truncated by LogLoader if necessary
     // so it is guaranteed(必然的) that the epoch entries will be correct(合适的，准确的) even when(词组，即使当) on-disk
-    // checkpoint was stale (due to async nature of LeaderEpochFileCache#truncateFromStart/End).
+    // checkpoint was stale(不新鲜的，陈旧的) (due to async nature of LeaderEpochFileCache#truncateFromStart/End).
+    // 涉及文件： leader-epoch-checkpoint
     val leaderEpochCache = UnifiedLog.maybeCreateLeaderEpochCache(
       dir,
       topicPartition,
@@ -2100,6 +2135,7 @@ object UnifiedLog extends Logging {
   private def loadProducersFromRecords(producerStateManager: ProducerStateManager, records: Records): Unit = {
     val loadedProducers = mutable.Map.empty[Long, ProducerAppendInfo]
     val completedTxns = ListBuffer.empty[CompletedTxn]
+
     records.batches.forEach { batch =>
       if (batch.hasProducerId) {
         val maybeCompletedTxn = updateProducers(
@@ -2111,10 +2147,15 @@ object UnifiedLog extends Logging {
         maybeCompletedTxn.foreach(completedTxns += _)
       }
     }
+
     loadedProducers.values.foreach(producerStateManager.update)
     completedTxns.foreach(producerStateManager.completeTxn)
   }
 
+  /**
+   * 返回的 CompletedTxn 并不是“整个事务已完结”的意思，而是 “这一批（RecordBatch）对事务首尾偏移的贡献已记录完毕” 的瞬时快照——语义 = “区间已闭合”，而非“事务已提交/已中止”。
+   * CompletedTxn 只是“区间对象”，不负责事务生命周期，只告诉上层：“这批从 first 到 last 的事务区间可以拿去更新索引、推进 LSO”。
+   */
   private def updateProducers(producerStateManager: ProducerStateManager,
                               batch: RecordBatch,
                               producers: mutable.Map[Long, ProducerAppendInfo],
@@ -2161,6 +2202,7 @@ object UnifiedLog extends Logging {
       None
     } else {
       val checkpointFile = new LeaderEpochCheckpointFile(leaderEpochFile, logDirFailureChannel)
+      // 当前有缓存的话 就把缓存同步到文件 leader-epoch-checkpoint，否则创建一个新的缓存
       currentCache.map(_.withCheckpoint(checkpointFile))
         .orElse(Some(new LeaderEpochFileCache(topicPartition, checkpointFile, scheduler)))
     }
@@ -2201,7 +2243,7 @@ object UnifiedLog extends Logging {
 
   /**
    * Rebuilds producer state until the provided lastOffset. This function may be called from the
-   * recovery code path, and thus must be free of all side-effects, i.e. it must not update any log-specific state.
+   * recovery code path, and thus must be free of all side-effects(副作用), i.e. it must not update any log-specific state.
    *
    * @param producerStateManager    The ProducerStateManager instance to be rebuilt.
    * @param segments                The segments of the log whose producer state is being rebuilt
@@ -2221,6 +2263,7 @@ object UnifiedLog extends Logging {
                                         time: Time,
                                         reloadFromCleanShutdown: Boolean,
                                         logPrefix: String): Unit = {
+    // 准备打快照的偏移量
     val offsetsToSnapshot =
       if (segments.nonEmpty) {
         val lastSegmentBaseOffset = segments.lastSegment.get.baseOffset
@@ -2252,9 +2295,9 @@ object UnifiedLog extends Logging {
         // lastMapOffset > lastSnapOffset 打快照
         producerStateManager.takeSnapshot()
       }
-    } else {
+    } else { //有快照的情况
       info(s"${logPrefix}Reloading from producer snapshot and rebuilding producer state from offset $lastOffset")
-      // 日志截断之前没有活跃的生产者并且所有事物都已经同步到ISR && 生产者状态管理器加载的最新偏移量已经覆盖了lastOffset即当前Segment已经被加载了
+      // 没有活跃的生产者并且所有事物都已经同步到ISR && 生产者状态管理器加载的最新偏移量已经覆盖了lastOffset
       val isEmptyBeforeTruncation = producerStateManager.isEmpty && producerStateManager.mapEndOffset >= lastOffset
       val producerStateLoadStart = time.milliseconds()
       producerStateManager.truncateAndReload(logStartOffset, lastOffset, time.milliseconds())
@@ -2267,16 +2310,34 @@ object UnifiedLog extends Logging {
       // If there weren't, then truncating shouldn't change that fact
       // (although it could cause a producerId to expire earlier than expected), and we can skip the loading.
       // This is an optimization for users which are not yet using idempotent(幂等性)/transactional features yet.
+      /**
+       * | 目标              | 做法                                         | 收益                      |
+       * | -----------      | ------------------------------------        | ----------------------- |
+       * | **补全缺失的状态** | 只扫 `[mapEndOffset, lastOffset]` 区间       | 避免全量扫描，**秒级**完成         |
+       * | **快照点不落空**  | 遇到计划点立即 `takeSnapshot()`                | 下次重启可直接从快照加载，**缩短恢复时间** |
+       * | **零拷贝读取**   | `segment.read(...)` 返回 `FileRecords`        | **无额外内存拷贝**，性能最高        |
+       * | **并发安全**    | 全程无全局锁，跳表区间遍历                        | **不影响写入路径**             |
+       * 日志末尾多了一段 → 只补那一段 → 边走边打快照 → 状态与日志秒级对齐，既快又省，还让下次重启更快
+       *
+       * producerStateManager.truncateAndReload 这里做了个截断操作，因此需要判断下截断之前有没有活跃的生产者、未同步完的事物未处理
+       *  日志末尾比状态表多了一段，且表里原有数据仍有效，只需 增量补扫，无需全量重建。
+       */
       if (lastOffset > producerStateManager.mapEndOffset && !isEmptyBeforeTruncation) {
+        // 找到 包含 lastOffset 的那段日志段（可能是最后一个段）
         val segmentOfLastOffset = segments.floorSegment(lastOffset)
 
+        // 只遍历“漏掉”的那些段（从状态表末尾到日志末尾），避免全表扫描
         segments.values(producerStateManager.mapEndOffset, lastOffset).forEach { segment =>
+          // 取 三段中最靠后的 offset 作为本次扫描起点，防止重复或越界
           val startOffset = Utils.max(segment.baseOffset, producerStateManager.mapEndOffset, logStartOffset)
+          // 把状态表“读指针”先推到本次起点
           producerStateManager.updateMapEndOffset(startOffset)
 
+          // 如果这段段头正好是 预设计划快照点，就顺手落盘一份，加速下次重启
           if (offsetsToSnapshot.contains(Some(segment.baseOffset)))
             producerStateManager.takeSnapshot()
 
+          // 对最后一段只读到 lastOffset 对应的物理位置；对中间段直接读整个文件，避免多读
           val maxPosition = if (segmentOfLastOffset.isPresent && segmentOfLastOffset.get == segment) {
             Option(segment.translateOffset(lastOffset))
               .map(_.position)
@@ -2285,9 +2346,12 @@ object UnifiedLog extends Logging {
             segment.size
           }
 
+          // 零拷贝把这段日志读进内存
           val fetchDataInfo = segment.read(startOffset, Int.MaxValue, maxPosition)
-          if (fetchDataInfo != null)
+          if (fetchDataInfo != null) {
+            // 逐条解析 RecordBatch，把 PID、序列号、事务开始/结束 重新填回状态表
             loadProducersFromRecords(producerStateManager, fetchDataInfo.records)
+          }
         }
       }
       producerStateManager.updateMapEndOffset(lastOffset)
@@ -2409,7 +2473,7 @@ case class RetentionSizeBreach(log: UnifiedLog, remoteLogEnabledAndRemoteCopyEna
     var size = log.size
     toDelete.foreach { segment =>
       size -= segment.size
-      if (remoteLogEnabledAndRemoteCopyEnabled) log.info(s"Deleting segment $segment due to local log retention size ${UnifiedLog.localRetentionSize(log.config, remoteLogEnabledAndRemoteCopyEnabled)} breach. " +
+      if (remoteLogEnabledAndRemoteCopyEnabled) log.info(s"Deleting segment $segment due to local log retention(保留) size ${UnifiedLog.localRetentionSize(log.config, remoteLogEnabledAndRemoteCopyEnabled)} breach. " +
         s"Local log size after deletion will be $size.")
       else log.info(s"Deleting segment $segment due to log retention size ${log.config.retentionSize} breach. Log size " +
         s"after deletion will be $size.")
@@ -2420,7 +2484,7 @@ case class RetentionSizeBreach(log: UnifiedLog, remoteLogEnabledAndRemoteCopyEna
 case class StartOffsetBreach(log: UnifiedLog, remoteLogEnabled: Boolean) extends SegmentDeletionReason {
   override def logReason(toDelete: List[LogSegment]): Unit = {
     if (remoteLogEnabled)
-      log.info(s"Deleting segments due to local log start offset ${log.localLogStartOffset()} breach: ${toDelete.mkString(",")}")
+      log.info(s"Deleting segments due to local log start offset ${log.localLogStartOffset()} breach(违反，违背): ${toDelete.mkString(",")}")
     else
       log.info(s"Deleting segments due to log start offset ${log.logStartOffset} breach: ${toDelete.mkString(",")}")
   }

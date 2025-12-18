@@ -44,6 +44,7 @@ trait ApiVersionManager {
 }
 
 object ApiVersionManager {
+
   def apply(
     listenerType: ListenerType,
     config: KafkaConfig,
@@ -62,6 +63,7 @@ object ApiVersionManager {
       clientMetricsManager
     )
   }
+
 }
 
 /**

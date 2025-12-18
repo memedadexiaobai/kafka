@@ -103,7 +103,7 @@ private[group] class GroupCoordinator(
   }
 
   /**
-   * NOTE: If a group lock and metadataLock are simultaneously needed,
+   * NOTE: If a group lock and metadataLock are simultaneously(同时) needed,
    * be sure to acquire the group lock before metadataLock to prevent deadlock
    */
 

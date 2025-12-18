@@ -27,24 +27,26 @@ import java.nio.ByteBuffer;
 import java.util.Optional;
 
 /**
- * An index that maps offsets to physical file locations for a particular log segment. This index may be sparse:
- * that is it may not hold an entry for all messages in the log.
+ * An index that maps offsets to physical file locations for a particular log segment. This index may be sparse(稀疏的):
+ * that is it may not hold(持有，维持) an entry(条目) for all messages in the log.
  *
  * The index is stored in a file that is pre-allocated to hold a fixed maximum number of 8-byte entries.
  *
  * The index supports lookups against a memory-map of this file. These lookups are done using a simple binary search variant
- * to locate the offset/location pair for the greatest offset less than or equal to the target offset.
+ * to locate(定位) the offset/location pair for the greatest offset less than or equal to the target offset.
  *
- * Index files can be opened in two ways: either as an empty, mutable index that allows appends or
- * an immutable read-only index file that has previously been populated. The makeReadOnly method will turn a mutable file into an
- * immutable one and truncate off any extra bytes. This is done when the index file is rolled over.
+ * Index files can be opened in two ways:
+ *  either as an empty, mutable index that allows appends or an immutable read-only index file that has previously been populated.
+ * The makeReadOnly method will turn a mutable file into an immutable one and truncate(截断) off any extra bytes.
+ * This is done when the index file is rolled over.
  *
  * No attempt is made to checksum the contents of this file, in the event of a crash it is rebuilt.
  *
- * The file format is a series of entries. The physical format is a 4 byte "relative" offset and a 4 byte file location for the
- * message with that offset. The offset stored is relative to the base offset of the index file. So, for example,
- * if the base offset was 50, then the offset 55 would be stored as 5. Using relative offsets in this way let's us use
- * only 4 bytes for the offset.
+ * The file format is a series of entries.
+ *  The physical format is a 4 byte "relative" offset and a 4 byte file location for the message with that offset.
+ *  The offset stored is relative to the base offset of the index file.
+ * So, for example, if the base offset was 50, then the offset 55 would be stored as 5.
+ * Using relative offsets in this way let's us use only 4 bytes for the offset.
  *
  * The frequency of entries is up to the user of this class.
  *
@@ -204,14 +206,23 @@ public class OffsetIndex extends AbstractIndex {
 
     @Override
     protected OffsetPosition parseEntry(ByteBuffer buffer, int n) {
+        /**
+         * 索引项物理布局(稀疏跳表),每条索引固定 8 字节：
+         *   0-3 字节：relativeOffset  （相对于 baseOffset 的差值，Int）
+         *   4-7 字节：physicalPosition （在 .log 文件里的绝对字节位置，Int）
+         *
+         * 把索引文件里第 n 条记录翻译成人类能懂的 (offset, position) 对：”无对象分配、无拷贝、纯指针算术，O(1) 完成。
+         */
         return new OffsetPosition(baseOffset() + relativeOffset(buffer, n), physical(buffer, n));
     }
 
     private int relativeOffset(ByteBuffer buffer, int n) {
+        // getInt读取4个字节的数据 int：4个字节 读出 第 n 条索引的 4 字节差值
         return buffer.getInt(n * ENTRY_SIZE);
     }
 
     private int physical(ByteBuffer buffer, int n) {
+        //  读出 第 n 条索引的 4 字节物理地址
         return buffer.getInt(n * ENTRY_SIZE + 4);
     }
 

@@ -99,6 +99,7 @@ public abstract class AbstractIndex implements Closeable {
             if (newlyCreated) {
                 if (maxIndexSize < entrySize())
                     throw new IllegalArgumentException("Invalid max index size: " + maxIndexSize);
+                // entrySize()获取的是每个entry的大小，实际的索引必须是entrySize的倍数，这里返回的是不大于maxIndexSize的entrySize的最小倍数
                 raf.setLength(roundDownToExactMultiple(maxIndexSize, entrySize()));
             }
 
@@ -381,8 +382,21 @@ public abstract class AbstractIndex implements Closeable {
      * In there future, we may use a backend thread to periodically touch the entire warm section. So that, we can
      * 1) support larger warm section
      * 2) make sure the warm section of low QPS topic-partitions are really warm.
+     *
+     * 8192 字节 = 8 KiB，是主流 Linux/Windows 的 默认内存页大小（PAGE_SIZE）
+     *  磁盘预读、内存映射（mmap）、CPU 缓存行都是以页为单位工作。
+     *  一次只拉一个页，不多不少，最省磁盘 I/O，也最省内存带宽。
      */
     protected final int warmEntries() {
+        // 一次预读（warming）多少条索引项，刚好能填满一个内存页？
+        // | 索引类型     | entrySize() | warmEntries() | 含义                  |
+        // | ----------- | ----------- | ------------- | --------------        |
+        // | OffsetIndex | 8 B         | 1024          | 预读 1024 条偏移量索引  |
+        // | TimeIndex   | 12 B        | 682           | 预读 682 条时间戳索引   |
+        // 每次“暖”索引，只把刚好一页的数据拖进内存：
+        //  不会跨页，减少缺页中断；
+        //  不会少读，保证后续二分查找都在这一页里完成；
+        //  让 mmap 的文件视图与硬件页对齐，性能最优。
         return 8192 / entrySize();
     }
 
@@ -489,22 +503,33 @@ public abstract class AbstractIndex implements Closeable {
         if (entries == 0)
             return -1;
 
+        // warmEntries获取的是一个内存页可以存放的索引条目数，因此这里获取的是最后以后索引条目所处的内存页的起始条目
+        // 比如 10个条目，一个内存页最多放5个条目，那么最后一个内存页所处的起始条目索引就是4 索引从0开始的
+        // firstHotEntry 就是倒数一页的第一条下标。
+        // 例：共 5000 条，一页 1024 条 → firstHotEntry = 5000-1-1024 = 3975
         int firstHotEntry = Math.max(0, entries - 1 - warmEntries());
         // check if the target offset is in the warm section of the index
-        if (compareIndexEntry(parseEntry(idx, firstHotEntry), target, searchEntity) < 0) {
+        if (compareIndexEntry(parseEntry(idx, firstHotEntry), target, searchEntity) < 0) { // 目标在“热页”里 → 只在热页里二分
+            // 先把热页第一条拿出来跟 target 比。
+            // 如果 target 更大，说明它肯定落在最后 1024 条里。
+            // 只在这 1024 条里做二分 → 大概率 CPU L1 缓存命中，且不会触发额外缺页。
             return binarySearch(idx, target, searchEntity,
                 searchResultType, firstHotEntry, entries - 1);
         }
 
-        // check if the target offset is smaller than the least offset
+        // check if the target offset is smaller than the least offset 目标比全局最小值还小 → 直接返回边界
         if (compareIndexEntry(parseEntry(idx, 0), target, searchEntity) > 0) {
             switch (searchResultType) {
-                case LARGEST_LOWER_BOUND:
+                case LARGEST_LOWER_BOUND: // ≤ target 的最大值
                     return -1;
-                case SMALLEST_UPPER_BOUND:
+                case SMALLEST_UPPER_BOUND: // ≥ target 的最小值
                     return 0;
             }
         }
+        // [0 ... firstHotEntry-1]      [firstHotEntry ... entries-1]
+        // 冷区（很少访问）                热区（最近写/读，一内存页）
+        // ↑                             ↑
+        // 二分范围 2                     二分范围 1（优先）
 
         return binarySearch(idx, target, searchEntity, searchResultType, 0, firstHotEntry);
     }

@@ -114,6 +114,7 @@ trait MetadataCache {
 }
 
 object MetadataCache {
+
   def zkMetadataCache(brokerId: Int,
                       metadataVersion: MetadataVersion,
                       brokerFeatures: BrokerFeatures = BrokerFeatures.createEmpty(),
@@ -128,4 +129,5 @@ object MetadataCache {
   ): KRaftMetadataCache = {
     new KRaftMetadataCache(brokerId, kraftVersionSupplier)
   }
+
 }

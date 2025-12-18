@@ -33,8 +33,9 @@ import java.nio.MappedByteBuffer;
  *
  * The index is stored in a file that is preallocated to hold a fixed maximum amount of 12-byte time index entries.
  * The file format is a series of time index entries. The physical format is a 8 bytes timestamp and a 4 bytes "relative"
- * offset used in the [[OffsetIndex]]. A time index entry (TIMESTAMP, OFFSET) means that the biggest timestamp seen
- * before OFFSET is TIMESTAMP. i.e. Any message whose timestamp is greater than TIMESTAMP must come after OFFSET.
+ * offset used in the [[OffsetIndex]].
+ * A time index entry (TIMESTAMP, OFFSET) means that the biggest timestamp seen before OFFSET is TIMESTAMP.
+ * i.e. Any message whose timestamp is greater than TIMESTAMP must come after(在之后) OFFSET.
  *
  * All external APIs translate from relative offsets to full offsets, so users of this class do not interact with the internal
  * storage format.

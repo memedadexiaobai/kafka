@@ -468,7 +468,7 @@ public class LogSegment implements Closeable {
     }
 
     /**
-     * Run recovery on the given segment. This will rebuild the index from the log file and lop off any invalid bytes
+     * Run recovery on the given segment. This will rebuild the index from the log file and lop off(删除) any invalid bytes
      * from the end of the log and index.
      *
      * This method is not thread-safe.
@@ -478,6 +478,8 @@ public class LogSegment implements Closeable {
      * @param leaderEpochCache Optionally a cache for updating the leader epoch during recovery.
      * @return The number of bytes truncated from the log
      * @throws LogSegmentOffsetOverflowException if the log segment contains an offset that causes the index offset to overflow
+     *
+     * 把磁盘上可能损坏/多余的字节切掉，同时重建索引和生产者状态，让段回到“健康且一致”的长度。
      */
     public int recover(ProducerStateManager producerStateManager, Optional<LeaderEpochFileCache> leaderEpochCache) throws IOException {
         offsetIndex().reset();
@@ -488,8 +490,8 @@ public class LogSegment implements Closeable {
         maxTimestampAndOffsetSoFar = TimestampOffset.UNKNOWN;
         try {
             for (RecordBatch batch : log.batches()) {
-                batch.ensureValid();
-                ensureOffsetInRange(batch.lastOffset());
+                batch.ensureValid();  // ① 校验校验和、格式
+                ensureOffsetInRange(batch.lastOffset()); // ② 保证 offset 单调递增
 
                 // The max timestamp is exposed at the batch level, so no need to iterate the records
                 if (batch.maxTimestamp() > maxTimestampSoFar()) {
@@ -683,11 +685,26 @@ public class LogSegment implements Closeable {
      * Append the largest time index entry to the time index and trim the log and indexes.
      *
      * The time index entry appended will be used to decide when to delete the segment.
+     *
+     * LogSegment 从“活跃写”变成“只读冻结”那一刻的收尾仪式——
+     *  当新的活跃段被创建，当前段“退役”时 → 立即调用本方法。
+     *  把最后一丝数据/索引/文件尾巴收拢干净，让段进入“不可变”状态，后续只能读不能写
+     *
+     * | 目标                | 手段                                        |
+     * | ------------       | ----------------------------------------- |
+     * | **索引完整**        | 补写最大时间戳，防止消费端按时间戳查找时漏掉最后一批                |
+     * | **内存/磁盘瘦身**   | 截短所有文件 → **mmap 虚拟内存立即归还**，磁盘占用 = 真实数据量   |
+     * | **进入不可变**      | 文件长度固定 → **后续读操作无需加锁**，并发读性能最高            |
+     * | **为清理/复制铺路** | 长度确定后，LogCleaner、Follower 副本才能准确计算区间、生成切片 |
      */
     public void onBecomeInactiveSegment() throws IOException {
+        // 强制把段内最大时间戳写进时间索引尾部（第三个参数 true 代表“必须写”，防止之前因间隔未写而漏掉）
         timeIndex().maybeAppend(maxTimestampSoFar(), shallowOffsetOfMaxTimestampSoFar(), true);
+        // 把偏移量索引文件 *.index 截到实际写入长度，释放 mmap 多余虚拟内存
         offsetIndex().trimToValidSize();
+        // 同理，截短 *.timeindex
         timeIndex().trimToValidSize();
+        // 把日志文件 *.log 物理截到真实末尾，释放预分配的多余空间（Kafka 默认预分配整段，避免运行时频繁扩容）
         log.trim();
     }
 

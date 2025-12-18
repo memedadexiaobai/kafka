@@ -95,6 +95,8 @@ import scala.util.control.ControlThrowable
  * @param logs The pool of logs
  * @param logDirFailureChannel The channel used to add offline log dirs that may be encountered when cleaning the log
  * @param time A way to control the passage of time
+ *
+ *
  */
 class LogCleaner(initialConfig: CleanerConfig,
                  val logDirs: Seq[File],

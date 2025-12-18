@@ -89,6 +89,7 @@ trait ForwardingManager {
 }
 
 object ForwardingManager {
+
   def apply(
     channelManager: NodeToControllerChannelManager,
     metrics: Metrics

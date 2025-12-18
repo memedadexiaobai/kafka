@@ -98,6 +98,19 @@ class TopicDeletionManager(config: KafkaConfig,
 
     if (isDeleteTopicEnabled) {
       controllerContext.queueTopicDeletion(initialTopicsToBeDeleted)
+
+      /**
+       * | 符号    | 解释                                        |
+       * | ----- | ----------------------------------------- |
+       * | `&`   | **集合交集**（Scala `Set` 的交集运算符）              |
+       * | `++=` | **可变集合并集追加**（`mutable.Set` 的 in-place 添加） |
+       * 取 “初始标记为不可删除的主题” 与 “当前正在等待删除的主题” 的 交集（即：那些曾经被标记为不可删除，但现在又出现在删除队列里的主题）
+       * 把上面交集 重新加回 topicsIneligibleForDeletion 集合（允许重复添加，Set 自动去重）
+       * “如果某些主题原本被认为‘不可删除’，但此刻仍挂在删除队列里，那就继续把它们视为‘不可删除’，防止在 Controller 初始化阶段误删这些主题。”
+       *
+       * “不可删除”标签 > “待删除”队列，
+       * 交集内的主题 = 暂缓删除，等后续条件成熟再重新评估。
+       */
       controllerContext.topicsIneligibleForDeletion ++= initialTopicsIneligibleForDeletion & controllerContext.topicsToBeDeleted
     } else {
       // if delete topic is disabled clean the topic entries under /admin/delete_topics

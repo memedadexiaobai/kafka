@@ -67,8 +67,8 @@ abstract class PartitionStateMachine(controllerContext: ControllerContext) exten
   }
 
   private def triggerOnlineStateChangeForPartitions(partitions: collection.Set[TopicPartition]): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
-    // try to move all partitions in NewPartition or OfflinePartition state to OnlinePartition state except partitions
-    // that belong to topics to be deleted
+    // try to move all partitions in NewPartition or OfflinePartition state to OnlinePartition state
+    // except partitions that belong to topics to be deleted
     val partitionsToTrigger = partitions.filter { partition =>
       !controllerContext.isTopicQueuedUpForDeletion(partition.topic)
     }.toSeq
@@ -181,7 +181,7 @@ class ZkPartitionStateMachine(config: KafkaConfig,
   }
 
   /**
-   * This API exercises the partition's state machine. It ensures that every state transition happens from a legal
+   * This API exercises(练习，使用，运用了) the partition's state machine. It ensures that every state transition happens from a legal
    * previous state to the target state. Valid state transitions are:
    * NonExistentPartition -> NewPartition:
    * --load assigned replicas from ZK to controller cache
@@ -199,6 +199,7 @@ class ZkPartitionStateMachine(config: KafkaConfig,
    *
    * OfflinePartition -> NonExistentPartition
    * --nothing other than marking the partition state as NonExistentPartition
+   *
    * @param partitions  The partitions for which the state transition is invoked
    * @param targetState The end state that the partition should be moved to
    * @return A map of failed and successful elections when targetState is OnlinePartitions. The keys are the
@@ -212,6 +213,7 @@ class ZkPartitionStateMachine(config: KafkaConfig,
   ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
     val stateChangeLog = stateChangeLogger.withControllerEpoch(controllerContext.epoch)
     val traceEnabled = stateChangeLog.isTraceEnabled
+
     partitions.foreach(partition => controllerContext.putPartitionStateIfNotExists(partition, NonExistentPartition))
     val (validPartitions, invalidPartitions) = controllerContext.checkValidPartitionStateChange(partitions, targetState)
     invalidPartitions.foreach(partition => logInvalidTransition(partition, targetState))
@@ -529,6 +531,14 @@ class ZkPartitionStateMachine(config: KafkaConfig,
 }
 
 object PartitionLeaderElectionAlgorithms {
+
+  /**
+   * 作用：为离线分区（所有副本都下线的分区）选举 Leader。
+   * 逻辑：
+   *  优先从 ISR 中选择：在副本分配列表 assignment 中，查找同时存在于存活副本 liveReplicas 和 ISR 列表 isr 中的第一个副本。
+   *  不洁选举：如果未找到符合条件的副本且启用了不洁选举（uncleanLeaderElectionEnabled），则从存活副本中选择第一个副本作为 Leader。
+   *  更新统计：如果进行了不洁选举，更新不洁选举的统计信息。
+   */
   def offlinePartitionLeaderElection(assignment: Seq[Int], isr: Seq[Int], liveReplicas: Set[Int],
                                      uncleanLeaderElectionEnabled: Boolean, controllerContext: ControllerContext): Option[Int] = {
     assignment.find(id => liveReplicas.contains(id) && isr.contains(id)).orElse {
@@ -543,14 +553,26 @@ object PartitionLeaderElectionAlgorithms {
     }
   }
 
+  /**
+   * 作用：在分区重分配过程中选举 Leader。
+   * 逻辑：在重分配列表 reassignment 中，查找同时存在于存活副本 liveReplicas 和 ISR 列表 isr 中的第一个副本。
+   */
   def reassignPartitionLeaderElection(reassignment: Seq[Int], isr: Seq[Int], liveReplicas: Set[Int]): Option[Int] = {
     reassignment.find(id => liveReplicas.contains(id) && isr.contains(id))
   }
 
+  /**
+   * 作用：选举首选副本（通常是分区分配列表中的第一个副本）作为 Leader。
+   * 逻辑：选择分区分配列表 assignment 中的第一个副本作为 Leader，前提是该副本存在于存活副本 liveReplicas 和 ISR 列表 isr 中。
+   */
   def preferredReplicaPartitionLeaderElection(assignment: Seq[Int], isr: Seq[Int], liveReplicas: Set[Int]): Option[Int] = {
     assignment.headOption.filter(id => liveReplicas.contains(id) && isr.contains(id))
   }
 
+  /**
+   * 作用：在受控关闭过程中选举 Leader。
+   * 逻辑：在副本分配列表 assignment 中，查找同时存在于存活副本 liveReplicas、ISR 列表 isr 中且不在关闭中的副本。
+   */
   def controlledShutdownPartitionLeaderElection(assignment: Seq[Int], isr: Seq[Int], liveReplicas: Set[Int], shuttingDownBrokers: Set[Int]): Option[Int] = {
     assignment.find(id => liveReplicas.contains(id) && isr.contains(id) && !shuttingDownBrokers.contains(id))
   }

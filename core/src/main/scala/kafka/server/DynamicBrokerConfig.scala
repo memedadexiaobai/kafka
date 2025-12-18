@@ -53,12 +53,12 @@ import scala.jdk.CollectionConverters._
 /**
   * Dynamic broker configurations are stored in ZooKeeper and may be defined at two levels:
   * <ul>
-  *   <li>Per-broker configs persisted at <tt>/configs/brokers/{brokerId}</tt>: These can be described/altered
+  *   <li>Per-broker configs persisted at <tt>/configs/brokers/{brokerId}</tt>: These can be described/altered(改变)
   *       using AdminClient using the resource name brokerId.</li>
   *   <li>Cluster-wide defaults persisted at <tt>/configs/brokers/&lt;default&gt;</tt>: These can be described/altered
   *       using AdminClient using an empty resource name.</li>
   * </ul>
-  * The order of precedence for broker configs is:
+  * The order of precedence(优先级) for broker configs is:
   * <ol>
   *   <li>DYNAMIC_BROKER_CONFIG: stored in ZK at /configs/brokers/{brokerId}</li>
   *   <li>DYNAMIC_DEFAULT_BROKER_CONFIG: stored in ZK at /configs/brokers/&lt;default&gt;</li>
@@ -227,7 +227,9 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
 
     zkClientOpt.foreach { zkClient =>
       val adminZkClient = new AdminZkClient(zkClient)
+      // /config/brokers/<default> 下配置的数据
       updateDefaultConfig(adminZkClient.fetchEntityConfig(ConfigType.BROKER, ZooKeeperInternals.DEFAULT_STRING), false)
+      // /config/brokers/${brokerId} 下配置的数据
       val props = adminZkClient.fetchEntityConfig(ConfigType.BROKER, kafkaConfig.brokerId.toString)
       val brokerConfig = maybeReEncodePasswords(props, adminZkClient)
       updateBrokerConfig(kafkaConfig.brokerId, brokerConfig)

@@ -274,6 +274,7 @@ class ReplicaManager(val config: KafkaConfig,
                      addPartitionsToTxnManager: Option[AddPartitionsToTxnManager] = None,
                      val directoryEventHandler: DirectoryEventHandler = DirectoryEventHandler.NOOP
                      ) extends Logging {
+
   private val metricsGroup = new KafkaMetricsGroup(this.getClass)
 
   val delayedProducePurgatory = delayedProducePurgatoryParam.getOrElse(
@@ -295,7 +296,7 @@ class ReplicaManager(val config: KafkaConfig,
     DelayedOperationPurgatory[DelayedRemoteFetch](
       purgatoryName = "RemoteFetch", brokerId = config.brokerId))
 
-  /* epoch of the controller that last changed the leader */
+  /* epoch of the controller that last changed the leader 从0开始增加 */
   @volatile private[server] var controllerEpoch: Int = KafkaController.InitialControllerEpoch
   protected val localBrokerId = config.brokerId
   protected val allPartitions = new Pool[TopicPartition, HostedPartition](

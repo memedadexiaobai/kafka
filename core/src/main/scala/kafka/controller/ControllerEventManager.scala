@@ -54,11 +54,22 @@ trait ControllerEventProcessor {
 
 class QueuedEvent(val event: ControllerEvent,
                   val enqueueTimeMs: Long) {
+  /**
+   * processingStarted 是一个 CountDownLatch 对象，用于控制线程的执行。
+   * countDown() 方法将计数器减 1，表示事件处理已经开始。
+   * 其他线程可以使用 processingStarted.await() 等待事件处理开始
+   */
   private val processingStarted = new CountDownLatch(1)
   private val spent = new AtomicBoolean(false) //spent:失效的
 
   def process(processor: ControllerEventProcessor): Unit = {
-    //先标识失效，
+    /**
+     * spent 是一个布尔标志，用于指示该事件是否已经被处理。
+     * getAndSet(true) 将 spent 的值设置为 true，并返回其旧值。
+     * 如果 spent 旧值为 true，说明事件已经被处理过，直接返回，避免重复处理
+     *
+     * 这段代码确保事件在控制器中按顺序且只处理一次，通过 spent 标志避免重复处理，并使用 processingStarted 通知其他线程事件处理的开始。
+     */
     if (spent.getAndSet(true))
       return
     processingStarted.countDown()
@@ -96,6 +107,10 @@ class ControllerEventManager(controllerId: Int,
   // Visible for test
   private[controller] var thread = new ControllerEventThread(ControllerEventThreadName)
 
+  /**
+   * eventQueueTimeHist 用于统计事件队列中的事件数量，帮助代码判断是否应该使用 poll 方法进行有限时等待，还是使用 take 方法进行无限制等待。
+   * 这种机制可以提高事件处理的效率和响应速度，避免不必要的阻塞和等待时间。
+   */
   private val eventQueueTimeHist = metricsGroup.newHistogram(EventQueueTimeMetricName)
 
   metricsGroup.newGauge(EventQueueSizeMetricName, () => queue.size)
@@ -144,6 +159,9 @@ class ControllerEventManager(controllerId: Int,
         case controllerEvent =>
           _state = controllerEvent.state
 
+          /**
+           * 更新事件在队列中的停留时间 计算事件从进入队列到被处理的历时，并更新相关的监控指标，以便对系统性能进行监控和优化。
+           */
           eventQueueTimeHist.update(time.milliseconds() - dequeued.enqueueTimeMs)
 
           try {
@@ -163,6 +181,19 @@ class ControllerEventManager(controllerId: Int,
   }
 
   private def pollFromEventQueue(): QueuedEvent = {
+    /**
+     * eventQueueTimeHist 是一个计数器，用于统计 eventQueue 中事件的数量。在判断 count != 0 时，代码会根据事件队列中是否有事件来决定使用 poll 方法还是 take 方法从队列中获取事件。
+     *
+     * 如果事件队列中的事件数量不为零，调用 queue.poll(eventQueueTimeTimeoutMs, TimeUnit.MILLISECONDS) 尝试在指定的超时时间内获取事件。
+     * 如果获取的事件为空（event == null），说明在超时时间内未能获取到事件，则调用 eventQueueTimeHist.clear() 清空事件计数器，并调用 queue.take() 从队列中获取事件，该方法会一直阻塞直到有事件可用。
+     * 如果获取的事件不为空，则直接返回该事件
+     *
+     * 如果事件队列中的事件数量为零，直接调用 queue.take() 从队列中获取事件，该方法会一直阻塞直到有事件可用。
+     *
+     * 通过判断事件队列是否为空（count != 0），代码决定是尝试在超时时间内获取事件（poll）还是直接阻塞等待事件（take）
+     *  如果事件队列为空，直接使用 take 方法阻塞等待新事件，避免不必要的超时等待；
+     *  如果事件队列不为空，则尝试使用 poll 方法在有限时间内获取事件，如果超时则清空计数器并使用 take 方法确保最终能获取到事件。
+     */
     val count = eventQueueTimeHist.count()
     if (count != 0) {
       val event  = queue.poll(eventQueueTimeTimeoutMs, TimeUnit.MILLISECONDS)

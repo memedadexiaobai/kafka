@@ -743,7 +743,7 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
     info("Starting up.")
     scheduler.startup()
     scheduler.schedule("transaction-abort",
-      () => abortTimedOutTransactions(onEndTransactionComplete), //清理过期事物
+      () => abortTimedOutTransactions(onEndTransactionComplete), //清理过期事务
       txnConfig.abortTimedOutTransactionsIntervalMs,
       txnConfig.abortTimedOutTransactionsIntervalMs
     )

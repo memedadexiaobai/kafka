@@ -359,7 +359,8 @@ class LogManager(logDirs: Seq[File],
       addStrayLog(topicPartition, log)
       warn(s"Loaded stray(偏离) log: $logDir")
     } else if (isStray(log)) {//默认false
-      // Unlike Zookeeper mode, which tracks pending topic deletions under a ZNode, KRaft is unable to prevent a topic from being recreated before every replica has been deleted.
+      // Unlike Zookeeper mode, which tracks pending(待定的) topic deletions under a ZNode,
+      // KRaft is unable to prevent(防止) a topic from being recreated before every replica has been deleted.
       // A KRaft broker with an offline directory may be unable to detect it still holds a to-be-deleted replica,
       // and can create a conflicting topic partition for a new incarnation of the topic in one of the remaining online directories.
       // So upon a restart in which the offline directory is back online we need to clean up the old replica directory.
@@ -414,7 +415,7 @@ class LogManager(logDirs: Seq[File],
   private[log] def loadLogs(defaultConfig: LogConfig, topicConfigOverrides: Map[String, LogConfig], isStray: UnifiedLog => Boolean): Unit = {
     info(s"Loading logs from log dirs $liveLogDirs")
     val startMs = time.hiResClockMs()
-    val threadPools = ArrayBuffer.empty[ExecutorService] //每个目录一个线程池
+    val threadPools = ArrayBuffer.empty[ExecutorService] //一个目录一个线程池
     val offlineDirs = mutable.Set.empty[(String, IOException)]
     val jobs = ArrayBuffer.empty[Seq[Future[_]]] //一共有多少个job 一个目录对应一个任务，也可以理解为有多少个目录需要处理
     var numTotalLogs = 0 //一共有多少需要处理的目录
@@ -429,6 +430,7 @@ class LogManager(logDirs: Seq[File],
     }
 
     val uncleanLogDirs = mutable.Buffer.empty[String]
+    // liveLogDirs 是校验完的 日志目录，包括 是否可读取、是否目录名冲突等等的校验
     for (dir <- liveLogDirs) {
       val logDirAbsolutePath = dir.getAbsolutePath
       var hadCleanShutdown: Boolean = false
@@ -438,7 +440,7 @@ class LogManager(logDirs: Seq[File],
 
         val cleanShutdownFileHandler = new CleanShutdownFileHandler(dir.getPath)
         if (cleanShutdownFileHandler.exists()) {
-          // Cache the clean shutdown status and use that for rest of log loading workflow. Delete the CleanShutdownFile
+          // Cache the clean shutdown status and use that for rest of log loading workflow. Delete the CleanShutdownFile 文件名：.kafka_cleanshutdown
           // so that if broker crashes while loading the log, it is considered hard shutdown during the next boot up. KAFKA-10471
           cleanShutdownFileHandler.delete()
           hadCleanShutdown = true
@@ -590,7 +592,7 @@ class LogManager(logDirs: Seq[File],
     val topicConfigOverrides = mutable.Map[String, LogConfig]()
     val defaultProps = defaultConfig.originals()
     topicNames.foreach { topicName =>
-      //拉取远程配置
+      // /config/topics 下的配置
       var overrides = configRepository.topicConfig(topicName)
       // save memory by only including configs for topics with overrides
       if (!overrides.isEmpty) {
@@ -622,8 +624,8 @@ class LogManager(logDirs: Seq[File],
 
   // visible for testing
   private[log] def startupWithConfigOverrides(
-    defaultConfig: LogConfig, //相当于全局配置
-    topicConfigOverrides: Map[String, LogConfig], //相当于主题的个性化配置
+    defaultConfig: LogConfig, //默认配置
+    topicConfigOverrides: Map[String, LogConfig], //从Zookeeper获取到的远程配置合并后的配置，针对单个主题的专门配置
     isStray: UnifiedLog => Boolean): Unit = {
 
     loadLogs(defaultConfig, topicConfigOverrides, isStray) // this could take a while if shutdown was not clean
@@ -631,10 +633,10 @@ class LogManager(logDirs: Seq[File],
     /* Schedule the cleanup task to delete old logs */
     if (scheduler != null) {
       info("Starting log cleanup with a period of %d ms.".format(retentionCheckMs))
-      scheduler.schedule("kafka-log-retention",
+      scheduler.schedule("kafka-log-retention", // 按照日志起始偏移、日志大小、日志留存时间进行日志的清理
                          () => cleanupLogs(), initialTaskDelayMs, retentionCheckMs)
       info("Starting log flusher with a default period of %d ms.".format(flushCheckMs))
-      scheduler.schedule("kafka-log-flusher",
+      scheduler.schedule("kafka-log-flusher", //把所有数据同步回磁盘，包括日志、索引
                          () => flushDirtyLogs(), initialTaskDelayMs, flushCheckMs)
       scheduler.schedule("kafka-recovery-point-checkpoint",
                          () => checkpointLogRecoveryOffsets(), initialTaskDelayMs, flushRecoveryOffsetCheckpointMs)
@@ -643,10 +645,12 @@ class LogManager(logDirs: Seq[File],
       scheduler.scheduleOnce("kafka-delete-logs", // will be rescheduled after each delete logs with a dynamic period
                          () => deleteLogs(), initialTaskDelayMs)
     }
+
     if (cleanerConfig.enableCleaner) {
       _cleaner = new LogCleaner(cleanerConfig, liveLogDirs, currentLogs, logDirFailureChannel, time = time)
       _cleaner.startup()
     }
+
   }
 
   /**
@@ -1406,7 +1410,7 @@ class LogManager(logDirs: Seq[File],
     // clean current logs.
     val deletableLogs = {
       if (cleaner != null) {
-        // prevent cleaner from working on same partitions when changing cleanup policy
+        // prevent(阻止) cleaner from working on same partitions when changing cleanup policy 更改清理策略时，阻止清理程序在相同的分区上工作
         cleaner.pauseCleaningForNonCompactedPartitions()
       } else {
         currentLogs.filter {
@@ -1450,15 +1454,29 @@ class LogManager(logDirs: Seq[File],
 
   /**
    * Map of log dir to logs by topic and partitions in that dir
+   *
+   * 把所有分区的日志（UnifiedLog）按它们所在的磁盘目录重新归类，生成一张 目录 → (分区 → 日志) 的二级地图
+   *   供后面的 checkpoint 线程 批量刷盘、计算配额、清理日志时快速遍历，避免全集群扫描，减少对象分配和 CPU 消耗。
+   *
+   * 返回的数据demo：
+   * /var/kafka-logs-0  → {TopicPartition(topic-0,0) -> UnifiedLog, (topic-1,2) -> UnifiedLog, ...}
+   * /var/kafka-logs-1  → {TopicPartition(topic-3,1) -> UnifiedLog, ...}
+   * 后面 checkpoint 线程 只要 按目录迭代 即可，不用全局锁、不用重新计算 parentDir，直接 byDir.get("/var/kafka-logs-0").foreach(...) 批量刷盘/清理
+   *
+   * logsByDir 就是 “目录速查表”：
+   * 5 秒一次、零锁、零装箱，让 checkpoint、清理、配额 等批量任务 按磁盘目录快速扫，省 CPU、省内存、省锁竞争——Kafka 高并发巡检的 高速缓存地图。
    */
   private def logsByDir: Map[String, Map[TopicPartition, UnifiedLog]] = {
     // This code is called often by checkpoint processes and is written in a way that reduces
     // allocations and CPU with many topic partitions.
     // When changing this code please measure the changes with org.apache.kafka.jmh.server.CheckpointBench
+    // 用 Scala 的高性能 Map（AnyRefMap） 替代普通 HashMap，无装箱、少内存、快遍历（专为 JMH 基准优化）
     val byDir = new mutable.AnyRefMap[String, mutable.AnyRefMap[TopicPartition, UnifiedLog]]()
     def addToDir(tp: TopicPartition, log: UnifiedLog): Unit = {
+      // 如果第一次遇到这个目录，就 新建一层子 Map，然后把 (分区, 日志) 塞进去；后续同目录直接 put
       byDir.getOrElseUpdate(log.parentDir, new mutable.AnyRefMap[TopicPartition, UnifiedLog]()).put(tp, log)
     }
+    // 把 当前正在写的日志 和 未来要替换的日志（用于在线扩容迁移）全部按目录归类，一个不拉
     currentLogs.foreachEntry(addToDir)
     futureLogs.foreachEntry(addToDir)
     byDir

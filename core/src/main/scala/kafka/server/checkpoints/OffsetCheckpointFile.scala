@@ -60,8 +60,11 @@ trait OffsetCheckpoint {
  *  tp1  par1  1     <- the format is: TOPIC  PARTITION  OFFSET
  *  tp1  par2  2
  *  -----checkpoint file end----------
+ *
+ *  日志相关有2种OffsetCheckpoint: recovery-point-offset-checkpoint、log-start-offset-checkpoint
  */
 class OffsetCheckpointFile(val file: File, logDirFailureChannel: LogDirFailureChannel = null) {
+
   val checkpoint = new CheckpointFileWithFailureHandler[(TopicPartition, Long)](file, OffsetCheckpointFile.CurrentVersion,
     OffsetCheckpointFile.Formatter, logDirFailureChannel, file.getParent)
 

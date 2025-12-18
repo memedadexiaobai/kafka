@@ -58,6 +58,7 @@ import scala.util.{Failure, Success, Try}
 
 object ControllerZNode {
   def path = "/controller"
+
   def encode(brokerId: Int, timestamp: Long, kraftControllerEpoch: Int = -1): Array[Byte] = {
     Json.encodeAsBytes(Map(
       "version" -> 2,
@@ -68,6 +69,7 @@ object ControllerZNode {
   def decode(bytes: Array[Byte]): Option[Int] = Json.parseBytes(bytes).map { js =>
     js.asJsonObject("brokerid").to[Int]
   }
+
   def decodeController(bytes: Array[Byte], zkVersion: Int): ZKControllerRegistration = Json.tryParseBytes(bytes) match {
     case Right(json) =>
       val controller = json.asJsonObject
@@ -78,6 +80,7 @@ object ControllerZNode {
     case Left(err) =>
       throw new KafkaException(s"Failed to parse ZooKeeper registration for controller: ${new String(bytes, UTF_8)}", err)
   }
+
 }
 
 case class ZKControllerRegistration(broker: Int, kraftEpoch: Option[Int], zkVersion: Int)
@@ -308,9 +311,11 @@ object TopicsZNode {
 }
 
 object TopicZNode {
+
   case class TopicIdReplicaAssignment(topic: String,
                                       topicId: Option[Uuid],
                                       assignment: Map[TopicPartition, ReplicaAssignment])
+
   def path(topic: String) = s"${TopicsZNode.path}/$topic"
   def encode(topicId: Option[Uuid],
              assignment: collection.Map[TopicPartition, ReplicaAssignment]): Array[Byte] = {

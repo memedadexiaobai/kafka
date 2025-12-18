@@ -50,6 +50,35 @@ import static org.apache.kafka.common.requests.OffsetsForLeaderEpochResponse.UND
  * Note that {@link #truncateFromStartAsyncFlush},{@link #truncateFromEndAsyncFlush} flush the epoch-entry changes to checkpoint asynchronously.
  * Hence(因此), it is instantiater's responsibility to ensure restoring the cache to the correct state after instantiating
  * this class from checkpoint (which might contain stale epoch entries right after instantiation).
+ *
+ * Kafka 0.11 引入的 “Leader 换届记录本”，每个副本分区目录下一份，作用一句话：
+ *   把“谁当过 Leader、从哪个位置开始写”记下来，让副本在重启、切换或截断时不再用旧的 HW 做判断，从而避免数据丢失和脑裂不一致
+ * 格式：
+ *  0 0
+ *  1 300
+ *  2 780
+ * 含义：
+ *  第 0 代 Leader 从 offset=0 开始写
+ *  第 1 代 Leader 从 offset=300 开始写
+ *  第 2 代 Leader 从 offset=780 开始写
+ *  文件随新 Leader 诞生 追加一行，并 刷盘持久化
+ *
+ * 工作步骤（副本视角）：
+ * | 场景                  | 动作                                                                                                                                                          |
+ * | -----------------    | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+ * | **副本成为 Leader**   | 把自己的 epoch+1 和当前 LEO 作为新一行写进文件；后续写消息都带这个 epoch 。                                                                                                            |
+ * | **副本成为 Follower** | ① 读本地文件恢复 epoch 列表；② 向 Leader 发 `LeaderEpochRequest` 带上自己最新 epoch；③ Leader 回一个 `LastOffset`（见下一条）；④ Follower 若自己的 LEO > `LastOffset` 就截断到该位置，再正常 fetch 同步 。 |
+ *
+ * LastOffset 怎么算
+ * 若 Follower 的 epoch == Leader 当前 epoch → 返回 Leader LEO
+ * 若 Follower 的 epoch < Leader 当前 epoch → 返回 “大于 Follower-epoch 的最小 startOffset”
+ * 例：Follower epoch=1，Leader 文件有 (1,20)(2,80)(3,120)
+ *
+ * 解决的老问题
+ *  数据丢失：旧方案用 HW 截断，HW 更新延迟，崩溃后可能把已提交消息剪掉；现在用 确定的 epoch+offset 做截断依据，不再丢消息 。
+ *  脑裂不一致：各副本不再各自用本地 HW，而是以 Leader 的 epoch 文件为准，保证大家“按同一把尺子”截断
+ *
+ *  leader-epoch-checkpoint 就是 “Leader 换届记录本”，让任何副本在重启或切换后都能 快速、安全地知道自己该从哪开始截断、从哪开始追数据，从而 零数据丢失、零不一致 地继续工作
  */
 public class LeaderEpochFileCache {
     private final TopicPartition topicPartition;
@@ -134,6 +163,7 @@ public class LeaderEpochFileCache {
 
         lock.writeLock().lock();
         try {
+            // epoch 不相等 或者  最大起始偏移量 < entry.startOffset
             if (isUpdateNeeded(entry)) {
                 maybeTruncateNonMonotonicEntries(entry);
                 epochs.put(entry.epoch, entry);

@@ -175,13 +175,33 @@ class LogLoader(
       }
     }
 
+    /**
+     * 这两段代码出现在 日志段被截断（truncate）或日志起始偏移向前推进（log-start-offset advance） 的场景里，
+     * 目的是 让 Leader Epoch 缓存与日志物理范围保持一致，并 异步刷盘，避免硬故障后残留过期 Epoch。
+     *
+     * 调用时机：当前段腐败/需要被截断到 nextOffset 时（nextOffset 是 修复后该段的最后一个合法 offset + 1）。
+     * 动作：把 Leader Epoch Cache 里 大于等于 nextOffset 的所有条目 删掉，并 异步刷盘（不阻塞主线程）。
+     * 为什么：被截掉的日志已经作废，对应的 Epoch 条目若保留，会让 Follower 在 Fetch 时错误地认为这些 Epoch 仍有效，导致 副本不一致。
+     *
+     */
     leaderEpochCache.ifPresent(_.truncateFromEndAsyncFlush(nextOffset))
+    // 启用了分层存储（Remote Log）：本地段可能已被上传到远程，起始偏移完全信任 checkpoint（RLM 会保证一致性）。
+    // 未启用：本地必须 至少保留第一段 的 baseOffset，防止把 还在磁盘上的段 误删；取二者较大者。
     val newLogStartOffset = if (isRemoteLogEnabled) {
       logStartOffsetCheckpoint
     } else {
       math.max(logStartOffsetCheckpoint, segments.firstSegment.get.baseOffset)
     }
-    // The earliest leader epoch may not be flushed during a hard failure. Recover it here.
+    /**
+     * The earliest leader epoch may not be flushed during a hard failure. Recover it here.
+     * 调用时机：新的 logStartOffset 向前推进后（例如用户调用 deleteRecords 或清理策略把旧段删了）。
+     * 动作：把 Cache 里 小于 newLogStartOffset 的所有 Epoch 条目 清掉，并 异步刷盘。
+     * 为什么：
+     *  日志头部已被物理删除或移到远程存储，这些旧 Epoch 不再对应任何本地日志，保留它们会让 Follower Fetch 时拿到 早已不存在的 Epoch；
+     *  副本截断时 找不到对应 offset，出现 LeaderEpochSequenceException；
+     *  日志再次截断时 计算错误。
+     *
+     */
     leaderEpochCache.ifPresent(_.truncateFromStartAsyncFlush(logStartOffsetCheckpoint))
 
     // Any segment loading or recovery code must not use producerStateManager, so that we can build the full state here from scratch.
@@ -191,6 +211,7 @@ class LogLoader(
     // Reload all snapshots into the ProducerStateManager cache, the intermediate(中间的) ProducerStateManager used
     // during log recovery may have deleted some files without the LogLoader.producerStateManager instance witnessing(见证) the deletion.
     producerStateManager.removeStraySnapshots(segments.baseOffsets)
+
     UnifiedLog.rebuildProducerState(
       producerStateManager,
       segments,
@@ -200,7 +221,9 @@ class LogLoader(
       time,
       reloadFromCleanShutdown = hadCleanShutdown,
       logIdent)
+
     val activeSegment = segments.lastSegment.get
+
     new LoadedLogOffsets(
       newLogStartOffset,
       newRecoveryPoint,
@@ -250,6 +273,7 @@ class LogLoader(
     //所有找到 .clean 文件中的最小的偏移量，这些是需要被清理的文件，小于这个最小偏移量的文件是应该被删除的，swapFiles.partition分出小于和大于最小偏移量的
     //删除小于最小偏移量的.swap文件，大于等于的保留属于有效.swap文件
     //IterableOps.partition()方法返回一个Tuple2，第一个元素是满足条件的元素，第二个元素是不满足条件的元素
+    //可以理解为：minCleanedFileOffset 之前的.swap文件是上一个操作没做完的，就差一步了，而大于 minCleanedFileOffset 的是新一轮操作的开始，不能确保已经完成了全部的日志操作，所以直接删除
     val (invalidSwapFiles, validSwapFiles) = swapFiles.partition(file => offsetFromFile(file) >= minCleanedFileOffset)
     invalidSwapFiles.foreach { file =>
       debug(s"Deleting invalid swap file ${file.getAbsoluteFile} minCleanedFileOffset: $minCleanedFileOffset")
@@ -366,6 +390,7 @@ class LogLoader(
       this.producerStateManager.maxTransactionTimeoutMs(),
       this.producerStateManager.producerStateManagerConfig(),
       time)
+
     UnifiedLog.rebuildProducerState(
       producerStateManager,
       segments,
@@ -375,6 +400,7 @@ class LogLoader(
       time,
       reloadFromCleanShutdown = false,
       logIdent)
+
     val bytesTruncated = segment.recover(producerStateManager, leaderEpochCache)
     // once we have recovered the segment's data, take a snapshot to ensure that we won't
     // need to reload the same segment again while recovering another segment.
@@ -390,11 +416,25 @@ class LogLoader(
    * This method does not need to convert IOException to KafkaStorageException because it is only called before all logs are loaded.
    *
    * @return a tuple containing (newRecoveryPoint, nextOffset).
-   *
    * @throws LogSegmentOffsetOverflowException if we encountered a legacy segment with offset overflow
+   *
+   *   目标：把磁盘上可能残缺、未刷盘、顺序乱的日志段全部修好，重建索引、事务状态，最终返回一个干净可用的（recoveryPoint, logEndOffset）区间。
+   *
+   *  启动
+   *   ├─ 干净关机？ ──是──→ (LEO, LEO)  // 快速路径
+   *   └─ 异常关机
+   *       ├─ 段尾<段头？ ──是──→ 全删 + 空段
+   *       └─ 逐段 recoverSegment()
+   *            ├─ 腐败──→ 删当前及之后所有段
+   *            └─ 健康──→ 继续
+   *  返回 (recoveryPoint, logEndOffset)
    */
   private[log] def recoverLog(): (Long, Long) = {
-    /** return the log end offset if valid */
+    /**
+     * return the log end offset if valid
+     * 段文件被人为删过 → 最后一条 offset 反而比 logStartOffsetCheckpoint 小，整段日志已无效。
+     * 直接清空所有段、epoch 缓存、生产者状态，从 logStartOffsetCheckpoint 重新开始。
+     */
     def deleteSegmentsIfLogStartGreaterThanLogEnd(): Option[Long] = {
       if (segments.nonEmpty) {
         val logEndOffset = segments.lastSegment.get.readNextOffset
@@ -412,7 +452,7 @@ class LogLoader(
       } else None
     }
 
-    // If we have the clean shutdown marker, skip recovery.
+    // If we have the clean shutdown marker, skip recovery. 只有**异常关机**才需要修复
     if (!hadCleanShutdown) {
       // 找当前LogSegments中小于等于 recoveryPointCheckpoint 的最大值(相当于距离恢复点最近的一个LogSegment)，存在则返回subMap，从最近的LogSegment开始遍历
       // 如果都小于recoveryPointCheckpoint，则从头开始遍历
@@ -442,8 +482,9 @@ class LogLoader(
           // we had an invalid message, delete all remaining log
           warn(s"Corruption found in segment ${segment.baseOffset}," + s" truncating to offset ${segment.readNextOffset}")
           val unflushedRemaining = new ArrayBuffer[LogSegment]
+          // “把从当前位置开始、迭代器里还没遍历到的所有 LogSegment，统统装进一个临时容器 unflushedRemaining 里。”
           unflushedIter.forEachRemaining(s => unflushedRemaining += s)
-          removeAndDeleteSegmentsAsync(unflushedRemaining)
+          removeAndDeleteSegmentsAsync(unflushedRemaining) // 把**后面所有段**全部砍掉
           truncated = true
           // segment is truncated, so set remaining segments to 0
           numRemainingSegments.put(threadName, 0)
@@ -458,6 +499,7 @@ class LogLoader(
 
     if (segments.isEmpty) {
       // no existing segments, create a new mutable segment beginning at logStartOffset
+      // 极端情况下段被删光 → 新建一个 空段 从 logStartOffsetCheckpoint 开始写。
       segments.add(
         LogSegment.open(
           dir,
@@ -475,6 +517,8 @@ class LogLoader(
     // If we advanced the recovery point here,
     // we could skip recovery for un flushed segments if the broker crashed
     // after we checkpoint the recovery point and before we flush the segment.
+    // 干净关机且没有腐败 → 直接把 recoveryPoint 抬到 logEndOffset，下次启动跳过修复。
+    // 异常关机 → recoveryPoint 保持 原 checkpoint 与当前 logEndOffset 的较小值，保证 下次重启继续从安全位置扫。
     (hadCleanShutdown, logEndOffsetOption) match {
       case (true, Some(logEndOffset)) =>
         (logEndOffset, logEndOffset)

@@ -53,6 +53,7 @@ trait ControllerNodeProvider {
   def getControllerInfo(): ControllerInformation
 }
 
+// 从zkMetadataCache中获取对应的Controller信息
 class MetadataCacheControllerNodeProvider(
   val metadataCache: ZkMetadataCache,
   val config: KafkaConfig,
@@ -374,8 +375,9 @@ class NodeToControllerRequestThread(
 
   override def doWork(): Unit = {
     val controllerInformation = controllerNodeProvider.getControllerInfo()
+    // 当Controller变更的时候 关闭之前的链接，建立到新Controller的链接
     maybeResetNetworkClient(controllerInformation)
-    if (activeControllerAddress().isDefined) {
+    if (activeControllerAddress().isDefined) { //拿到Controller 地址了就直接请求
       super.pollOnce(Long.MaxValue)
     } else {
       debug("Controller isn't cached, looking for local metadata changes")

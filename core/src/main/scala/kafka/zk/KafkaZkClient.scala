@@ -144,19 +144,21 @@ class KafkaZkClient private[zk] (
           throw new IllegalStateException(s"${ControllerEpochZNode.path} existed before but goes away while trying to read it"))
 
         // If the epoch is the same as newControllerEpoch, it is safe to infer that the returned epoch zkVersion
-        // is associated with the current broker during controller election because we already knew that the zk
-        // transaction succeeds based on the controller znode verification. Other rounds of controller
-        // election will result in larger epoch number written in zk.
+        // is associated with the current broker during controller election
+        // because we already knew that the zk transaction succeeds based on the controller znode verification.
+        // Other rounds of controller election will result in larger epoch number written in zk.
         if (epoch == newControllerEpoch)
           return (newControllerEpoch, stat.getVersion)
       }
-      throw new ControllerMovedException("Controller moved to another broker. Aborting controller startup procedure")
+      throw new ControllerMovedException("Controller moved to another broker. Aborting controller startup procedure(程序)")
     }
 
     def tryCreateControllerZNodeAndIncrementEpoch(): (Int, Int) = {
       val response = retryRequestUntilConnected(
         MultiRequest(Seq(
+          // /controller
           CreateOp(ControllerZNode.path, ControllerZNode.encode(controllerId, timestamp), defaultAcls(ControllerZNode.path), CreateMode.EPHEMERAL),
+          // /controller_epoch
           SetDataOp(ControllerEpochZNode.path, ControllerEpochZNode.encode(newControllerEpoch), expectedControllerEpochZkVersion)))
       )
       response.resultCode match {
@@ -280,6 +282,7 @@ class KafkaZkClient private[zk] (
 
   /**
    * Gets topic partition states for the given partitions.
+   * /brokers/topics/$topic/partitions/分区号/state
    * @param partitions the partitions for which we want to get states.
    * @return sequence of GetDataResponses whose contexts are the partitions they are associated with.
    */
@@ -803,6 +806,7 @@ class KafkaZkClient private[zk] (
 
   /**
    * Gets the TopicID and replica assignments for the given topics.
+   *   /brokers/topics/$topic
    * @param topics the topics whose partitions we wish to get the assignments for.
    * @return the TopicIdReplicaAssignment for each partition for the given topics.
    */
@@ -1034,6 +1038,7 @@ class KafkaZkClient private[zk] (
    * @param expectedControllerEpochZkVersion expected controller epoch zkVersion.
    */
   def deleteTopicDeletions(topics: Seq[String], expectedControllerEpochZkVersion: Int): Unit = {
+    // /admin/delete_topics/$topic
     val deleteRequests = topics.map(topic => DeleteRequest(DeleteTopicsTopicZNode.path(topic), ZkVersion.MatchAnyVersion))
     retryRequestsUntilConnected(deleteRequests, expectedControllerEpochZkVersion)
   }
@@ -1122,6 +1127,7 @@ class KafkaZkClient private[zk] (
    * @return map containing LeaderIsrAndControllerEpoch of each partition for we were able to lookup the partition state.
    */
   def getTopicPartitionStates(partitions: Seq[TopicPartition]): Map[TopicPartition, LeaderIsrAndControllerEpoch] = {
+    // /brokers/topics/$topic/partitions/$partition/state
     val getDataResponses = getTopicPartitionStatesRaw(partitions)
     getDataResponses.flatMap { getDataResponse =>
       val partition = getDataResponse.ctx.get.asInstanceOf[TopicPartition]
@@ -1543,7 +1549,9 @@ class KafkaZkClient private[zk] (
    * Creates the required zk nodes for Delegation Token storage
    */
   def createDelegationTokenPaths(): Unit = {
+    // /delegation_token/token_changes
     createRecursive(DelegationTokenChangeNotificationZNode.path, throwIfPathExists = false)
+    // /delegation_token/tokens
     createRecursive(DelegationTokensZNode.path, throwIfPathExists = false)
   }
 
@@ -2119,6 +2127,7 @@ class KafkaZkClient private[zk] (
 
       // Only execute slow path if we find a response with CONNECTIONLOSS
       if (batchResponses.exists(_.resultCode == Code.CONNECTIONLOSS)) {
+        // 将请求和响应 按照元组进行返回，比如(re1,req2,req3).zip((rep1,rep2,rep2)) 返回 ((req3,rep3),(req3,rep3),(req3,rep3))
         val requestResponsePairs = remainingRequests.zip(batchResponses)
 
         remainingRequests.clear()
@@ -2129,7 +2138,7 @@ class KafkaZkClient private[zk] (
             responses += response
         }
 
-        if (remainingRequests.nonEmpty)
+        if (remainingRequests.nonEmpty) //如果有未成功处理的请求，则等待Zookeeper重新连接
           zooKeeperClient.waitUntilConnected()
       } else {
         remainingRequests.clear()

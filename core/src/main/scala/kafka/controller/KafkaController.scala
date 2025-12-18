@@ -303,16 +303,18 @@ class KafkaController(val config: KafkaConfig,
     info("Registering handlers")
 
     // before reading source of truth from zookeeper, register the listeners to get broker/topic callbacks
-    val childChangeHandlers = Seq(brokerChangeHandler, topicChangeHandler, topicDeletionHandler, logDirEventNotificationHandler,
-      isrChangeNotificationHandler)
+    val childChangeHandlers = Seq(brokerChangeHandler, topicChangeHandler, topicDeletionHandler,
+      logDirEventNotificationHandler, isrChangeNotificationHandler)
     childChangeHandlers.foreach(zkClient.registerZNodeChildChangeHandler)
 
     val nodeChangeHandlers = Seq(preferredReplicaElectionHandler, partitionReassignmentHandler)
     nodeChangeHandlers.foreach(zkClient.registerZNodeChangeHandlerAndCheckExistence)
 
     info("Deleting log dir event notifications")
+    // /log_dir_event_notification
     zkClient.deleteLogDirEventNotifications(controllerContext.epochZkVersion)
     info("Deleting isr change notifications")
+    // /isr_change_notification
     zkClient.deleteIsrChangeNotifications(controllerContext.epochZkVersion)
     info("Initializing controller context")
     initializeControllerContext()
@@ -372,21 +374,21 @@ class KafkaController(val config: KafkaConfig,
    * a name and a range of version numbers or a version number. A feature can be of two types:
    *
    * 1. Supported feature:
-   * A supported feature is represented by a name (string) and a range of versions (defined by a
-   * SupportedVersionRange). It refers to a feature that a particular broker advertises support for.
-   * Each broker advertises the version ranges of its own supported features in its own
-   * BrokerIdZNode. The contents of the advertisement are specific to the particular broker and
-   * do not represent any guarantee of a cluster-wide availability of the feature for any particular
+   * A supported feature is represented by a name (string) and a range of versions (defined by a SupportedVersionRange).
+   * It refers to a feature that a particular broker advertises support for(advertises support for ：指“声称支持、宣传支持”，强调公开声明对某项功能的支持。).
+   * Each broker advertises the version ranges of its own supported features in its own BrokerIdZNode.
+   * The contents of the advertisement are specific to the particular broker and
+   * do not represent any guarantee(保证) of a cluster-wide availability of the feature for any particular
    * range of versions.
    *
    * 2. Finalized feature:
-   * A finalized feature is represented by a name (string) and a specified version level (defined
-   * by a Short). Whenever the feature versioning system (KIP-584) is
-   * enabled, the finalized features are stored in the cluster-wide common FeatureZNode.
-   * In comparison to a supported feature, the key difference is that a finalized feature exists
-   * in ZK only when it is guaranteed to be supported by any random broker in the cluster for a
-   * specified range of version levels. Also, the controller is the only entity modifying the
-   * information about finalized features.
+   * A finalized feature is represented by a name (string) and a specified(指定的) version level (defined by a Short).
+   * Whenever(每当) the feature versioning system (KIP-584) is enabled,
+   * the finalized features are stored in the cluster-wide common FeatureZNode.
+   * In comparison to(与...相比) a supported feature, the key difference is that a finalized feature exists in ZK only
+   * when it is guaranteed to be supported by any random broker in the cluster for a specified range of version levels.
+   * Also, the controller is the only entity modifying the information about finalized features.
+   *
    *
    * This method sets up the FeatureZNode with enabled status, which means that the finalized
    * features stored in the FeatureZNode are active. The enabled status should be written by the
@@ -399,7 +401,7 @@ class KafkaController(val config: KafkaConfig,
    *    A new Kafka cluster (i.e. it is deployed first time) is almost always started with IBP config
    *    setting greater than or equal to IBP_2_7_IV0. We would like to start the cluster with all
    *    the possible supported features finalized immediately. Assuming this is the case, the
-   *    controller will start up and notice that the FeatureZNode is absent in the new cluster,
+   *    controller will start up and notice that the FeatureZNode is absent(缺席) in the new cluster,
    *    it will then create a FeatureZNode (with enabled status) containing the entire list of
    *    supported features as its finalized features.
    *
@@ -410,7 +412,7 @@ class KafkaController(val config: KafkaConfig,
    *    set to a higher value later. In this case, we want to start with no finalized features and
    *    allow the user to finalize them whenever they are ready i.e. in the future whenever the
    *    user sets IBP config to be greater than or equal to IBP_2_7_IV0, then the user could start
-   *    finalizing the features. This process ensures we do not enable all the possible features
+   *    finalizing(最终确定) the features. This process ensures we do not enable all the possible features
    *    immediately after an upgrade, which could be harmful to Kafka.
    *    This is how we handle such a case:
    *      - Before the IBP config upgrade (i.e. IBP config set to less than IBP_2_7_IV0), the
@@ -418,7 +420,7 @@ class KafkaController(val config: KafkaConfig,
    *        - If the node is absent, it will react by creating a FeatureZNode with disabled status
    *          and empty finalized features.
    *        - Otherwise, if a node already exists in enabled status then the controller will just
-   *          flip the status to disabled and clear the finalized features.
+   *          flip(翻转) the status to disabled and clear the finalized features.
    *      - After the IBP config upgrade (i.e. IBP config set to greater than or equal to
    *        IBP_2_7_IV0), when the controller starts up it will check if the FeatureZNode exists
    *        and whether it is disabled.
@@ -443,6 +445,7 @@ class KafkaController(val config: KafkaConfig,
    *    will switch the FeatureZNode status to disabled with empty features.
    */
   private def enableFeatureVersioning(): Unit = {
+    // /feature
     val (mayBeFeatureZNodeBytes, version) = zkClient.getDataAndVersion(FeatureZNode.path)
     if (version == ZkVersion.UnknownVersion) {
       val newVersion = createFeatureZNode(
@@ -964,17 +967,20 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def initializeControllerContext(): Unit = {
-    // update controller cache with delete topic information
+    // update controller cache with delete topic information /brokers/ids/$id
     val curBrokerAndEpochs = zkClient.getAllBrokerAndEpochsInCluster
     val (compatibleBrokerAndEpochs, incompatibleBrokerAndEpochs) = partitionOnFeatureCompatibility(curBrokerAndEpochs)
     if (incompatibleBrokerAndEpochs.nonEmpty) {
       warn("Ignoring registration of new brokers due to incompatibilities with finalized features: " +
         incompatibleBrokerAndEpochs.map { case (broker, _) => broker.id }.toSeq.sorted.mkString(","))
     }
+    // 兼容所有功能特性才能是 liveBroker
     controllerContext.setLiveBrokers(compatibleBrokerAndEpochs)
     info(s"Initialized broker epochs cache: ${controllerContext.liveBrokerIdAndEpochs}")
+    // /brokers/topics
     controllerContext.setAllTopics(zkClient.getAllTopicsInCluster(true))
     registerPartitionModificationsHandlers(controllerContext.allTopics.toSeq)
+    // /brokers/topics/$topic
     val replicaAssignmentAndTopicIds = zkClient.getReplicaAssignmentAndTopicIdForTopics(controllerContext.allTopics.toSet)
     processTopicIds(replicaAssignmentAndTopicIds)
 
@@ -1032,12 +1038,27 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def fetchTopicDeletionsInProgress(): (Set[String], Set[String]) = {
+    // /admin/delete_topics
     val topicsToBeDeleted = zkClient.getTopicDeletions.toSet
     val topicsWithOfflineReplicas = controllerContext.allTopics.filter { topic => {
       val replicasForTopic = controllerContext.replicasForTopic(topic)
+      // 节点在线同时离线副本集合不包含该副本
       replicasForTopic.exists(r => !controllerContext.isReplicaOnline(r.replica, r.topicPartition))
     }}
     val topicsForWhichPartitionReassignmentIsInProgress = controllerContext.partitionsBeingReassigned.map(_.topic)
+    /**
+     * | 符号   | 含义                           |
+     * | ---- | ---------------------------- |
+     * | '|' | **集合并集**（Scala `Set` 的并集运算符） |
+     *
+     * | 集合                                                | 内容                                |
+     * | ------------------------------------------------- | --------------------------------- |
+     * | `topicsWithOfflineReplicas`                       | **存在至少一个副本处于 “Offline” 状态** 的主题集合 |
+     * | `topicsForWhichPartitionReassignmentIsInProgress` | **当前正在执行分区重分配** 的主题集合             |
+     * 并集 = “要么有副本掉线，要么正在重分配” 的所有主题
+     * “把这些主题统一标记为‘此时不适合做其它元数据变更（例如 Preferred Leader 选举、主题删除、配置变更等）’，等副本恢复上线、或重分配完成后再放开
+     * “有副本掉线” 或 “正在搬家” 的主题 = 控制器全局互斥区域，先让集群自愈/搬完，再处理后续操作，防止竞态或数据不一致。
+     */
     val topicsIneligibleForDeletion = topicsWithOfflineReplicas | topicsForWhichPartitionReassignmentIsInProgress
     info(s"List of topics to be deleted: ${topicsToBeDeleted.mkString(",")}")
     info(s"List of topics ineligible for deletion: ${topicsIneligibleForDeletion.mkString(",")}")
@@ -1486,6 +1507,7 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def processStartup(): Unit = {
+    // /controller
     zkClient.registerZNodeChangeHandlerAndCheckExistence(controllerChangeHandler)
     elect()
   }
@@ -1560,6 +1582,7 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def elect(): Unit = {
+    // 获取 /controller 下的值
     activeControllerId = zkClient.getControllerId.getOrElse(-1)
     /*
      * We can get here during the initial startup and the handleDeleted ZK callback. Because of the potential(潜在的) race condition,
@@ -1727,7 +1750,7 @@ class KafkaController(val config: KafkaConfig,
     // Otherwise, maintain what we have in the topicZNode
     val updatedTopicIdAssignments = if (config.usesTopicId) {
       val (withTopicIds, withoutTopicIds) = topicIdAssignments.partition(_.topicId.isDefined)
-      withTopicIds ++ zkClient.setTopicIds(withoutTopicIds, controllerContext.epochZkVersion)
+      withTopicIds ++ zkClient.setTopicIds(withoutTopicIds, controllerContext.epochZkVersion) // epochZkVersion 默认0
     } else {
       topicIdAssignments
     }

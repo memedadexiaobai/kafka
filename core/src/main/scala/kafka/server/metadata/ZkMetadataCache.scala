@@ -162,9 +162,10 @@ class ZkMetadataCache(
   extends MetadataCache with ZkFinalizedFeatureCache with Logging {
 
   private val partitionMetadataLock = new ReentrantReadWriteLock()
-  //this is the cache state. every MetadataSnapshot instance is immutable, and updates (performed under a lock)
-  //replace the value with a completely new one. this means reads (which are not under any lock) need to grab
-  //the value of this var (into a val) ONCE and retain that read copy for the duration of their operation.
+  //this is the cache state. every MetadataSnapshot instance is immutable,
+  // and updates (performed under a lock) replace the value with a completely new one.
+  // this means reads (which are not under any lock) need to grab(抓取) the value of this var (into a val) ONCE
+  // and retain(保留) that read copy for the duration of their operation.
   //multiple reads of this value risk getting different snapshots.
   @volatile private var metadataSnapshot: MetadataSnapshot = MetadataSnapshot(
     partitionStates = mutable.AnyRefMap.empty,
@@ -181,7 +182,7 @@ class ZkMetadataCache(
   private val featureLock = new ReentrantLock()
   private val featureCond = featureLock.newCondition()
 
-  // This method is the main hotspot when it comes to the performance of metadata requests,
+  // This method is the main hotspot(热点) when it comes to the performance of metadata requests,
   // we should be careful about adding additional logic here. Relatedly, `brokers` is
   // `List[Integer]` instead of `List[Int]` to avoid a collection copy.
   // filterUnavailableEndpoints exists to support v0 MetadataResponses

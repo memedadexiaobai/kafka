@@ -54,6 +54,13 @@ public class FileRecords extends AbstractRecords implements Closeable {
     /**
      * The {@code FileRecords.open} methods should be used instead of this constructor whenever possible.
      * The constructor is visible for tests.
+     *
+     * | 变量               | 含义                |
+     * | ---------------- | ----------------- |
+     * | `channel.size()` | 文件当前实际大小（磁盘上多少字节） |
+     * | `end`            | 调用者想映射到的“逻辑终点”    |
+     * | `start`          | 映射起点（相对文件头的偏移）    |
+     * | `size`           | 最终记录下来的“有效映射区长度”  |
      */
     FileRecords(File file,
                 FileChannel channel,
@@ -69,6 +76,11 @@ public class FileRecords extends AbstractRecords implements Closeable {
 
         if (isSlice) {
             // don't check the file size if this is just a slice(切片) view
+            // 调用者 显式只要一段区间 [start, end)，不要求这段区间一定贴到文件尾。
+            //这段区间可能来自：
+            //正在写入的 活跃段（还没 fsync，文件长度随时变）；
+            //** compaction 过程中** 的临时拼接段；
+            //事务/幂等 场景下只读某几条 RecordBatch 做校验。
             size.set(end - start);
         } else {
             if (channel.size() > Integer.MAX_VALUE)
@@ -429,6 +441,24 @@ public class FileRecords extends AbstractRecords implements Closeable {
                                    int initFileSize,
                                    boolean preallocate) throws IOException {
         FileChannel channel = openChannel(file, mutable, fileAlreadyExists, initFileSize, preallocate); //preallocate:预分配
+        /**
+         * end 的值决定 “当前 FileRecords 允许读/写的逻辑边界”；
+         * | 场景                                       | `fileAlreadyExists`       | `preallocate` | `end` 取值            | 含义                                                                                    |
+         * | ---------------------------               | ------------------------- | ------------- | ------------------- | ------------------------------------------------------------------------------------- |
+         * | **全新空文件 + 预分配**                     | `false`                   | `true`        | `0`                 | **现在文件里只有空洞，没有有效数据**，只能写到 `0`，读也到 `0`；后续 **append 多少就动态把 end 前移多少**                   |
+         * | **已有数据 / 不预分配 / 预分配但文件已存在**  | `true` / `false` / `true` | 任意            | `Integer.MAX_VALUE` | **让边界失效**，真正边界由 **文件实际大小** 决定；`FileRecords` 内部每次读/写前会 `channel.size()` 做边界检查，**不会越界** |
+         *
+         * 为什么全新+预分配时 end=0
+         *  预分配 会把文件 mmap 到 initFileSize（例如 1 GB），但 内核只是标记“空洞”，并未写入有效字节。
+         *  如果此时把 end 设成 Integer.MAX_VALUE 或 initFileSize，上层代码可能读到全 0 空洞页，出现 SIGBUS 或 无效消息。
+         *  因此 初始有效长度 = 0；每 append 一批数据就同步把 end 前移，精确跟踪“真实数据尾”。
+         * 代码里如何动态前移 end
+         *   FileRecords.append() 末尾会：this.end += writtenBytes;   // 只让“已写入区域”对外可见
+         *   保证 外部永远看不到空洞。
+         * end 就是“当前可读可写的逻辑尾”：
+         *  预分配新文件 → 先设 0，避免读到空洞；随写入逐步前移。
+         *  已有数据/不预分配 → 设 MAX_VALUE，用真实文件大小做硬边界，不会少读也不会越界。
+         */
         int end = (!fileAlreadyExists && preallocate) ? 0 : Integer.MAX_VALUE;
         return new FileRecords(file, channel, 0, end, false);
     }
@@ -468,7 +498,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
                 return FileChannel.open(file.toPath(),
                         StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
             } else {
-                //RandomAccessFile 是 Java 中的一个类，用于随机访问文件。与传统的流式文件操作（如 FileInputStream 和 FileOutputStream）不同，
+                // RandomAccessFile 是 Java 中的一个类，用于随机访问文件。与传统的流式文件操作（如 FileInputStream 和 FileOutputStream）不同，
                 // RandomAccessFile 允许你在文件中的任何位置进行读写操作，而不仅仅是从头到尾顺序读写。
                 RandomAccessFile randomAccessFile = new RandomAccessFile(file, "rw");
                 randomAccessFile.setLength(initFileSize);

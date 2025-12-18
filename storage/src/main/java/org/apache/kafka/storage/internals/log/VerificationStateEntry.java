@@ -26,6 +26,15 @@ package org.apache.kafka.storage.internals.log;
  * We also store the lowest seen sequence to block a higher sequence from being written in the case of the lower sequence needing retries.
  *
  * Any lingering entries that are never verified are removed via the producer state entry cleanup mechanism.
+ *
+ * VerificationStateEntry 是 Kafka 幂等/事务流程里 “对新会话做序列号预检” 的临时门票——
+ * 生产者重启后、正式追加数据前，Broker 先拿它 快速验证“重试批”是否乱序，防止旧会话脏数据混入新会话，通过后才把状态正式写进 ProducerStateEntry。
+ *
+ * 诞生时机（源码位置）
+ *  ProducerStateManager.maybeCreateVerificationState
+ *  幂等 producer 重试或事务 producer 首次写时触发
+ *  只在 enable.idempotence=true 且 epoch 已升级（producer 重启）后存在
+ *
  */
 public class VerificationStateEntry {
 
@@ -63,7 +72,7 @@ public class VerificationStateEntry {
      * OutOfOrderSequence and retry until retries run out.
      *
      * Here, we keep the lowest sequence seen in order to prevent an OutOfOrderSequence loop when verifying. This does
-     * not solve the error loop for idempotent producers or transactional producers that fail before verification
+     * not solve the error loop for idempotent(幂等) producers or transactional producers that fail before verification
      * starts. When verification fails with a retriable error (ie. NOT_COORDINATOR), the VerificationStateEntry
      * maintains the lowest sequence number it sees and blocks higher sequences from being written to the log. However,
      * if we encounter a new and lower sequence when verifying, we want to block sequences higher than that new

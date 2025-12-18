@@ -226,11 +226,12 @@ class KafkaServer(
 
       val canStartup = isStartingUp.compareAndSet(false, true)
       if (canStartup) {
+        // kafka启动的3个过程：STARTING -> RECOVERY -> RUNNING
         _brokerState = BrokerState.STARTING
 
         /* setup zookeeper 初始化zk客户端，并创建部分顶层节点 */
         initZkClient(time)
-        // ZkConfigRepository我理解就是规范了获取配置的操作，而且提供了接口，可以进行外部扩展，而不仅仅是支持zk
+        // ZkConfigRepository我理解就是规范了获取配置的操作，而且提供了接口，可以进行外部扩展，而不仅仅是支持zk 面向接口编程
         configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
 
         /* Get or create cluster_id */
@@ -270,7 +271,7 @@ class KafkaServer(
         initialMetaPropsEnsemble.verify(Optional.of(_clusterId), verificationId, verificationFlags)
 
 
-        /* generate brokerId */
+        /* generate brokerId 优先  config.brokerId */
         config._brokerId = getOrGenerateBrokerId(initialMetaPropsEnsemble)
         config._nodeId = config.brokerId
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
@@ -314,9 +315,7 @@ class KafkaServer(
           //遍历的是emptyLogDirs和logDirProps也就是没有meta.properties文件和有meta.properties且解析成功的目录
           initialMetaPropsEnsemble.nonFailedDirectoryProps().forEachRemaining(e => {
             val logDir = e.getKey
-            val builder = new MetaProperties.Builder(e.getValue).
-              setClusterId(_clusterId).
-              setNodeId(config.brokerId)
+            val builder = new MetaProperties.Builder(e.getValue).setClusterId(_clusterId).setNodeId(config.brokerId)
             if (!builder.directoryId().isPresent) {
               if (config.migrationEnabled) {
                 builder.setDirectoryId(copier.generateValidDirectoryId())
@@ -349,7 +348,7 @@ class KafkaServer(
           logDirFailureChannel,
           config.usesTopicId)
         _brokerState = BrokerState.RECOVERY
-        // /brokers/topics 获取集群下的所有节点即集群下的所有主题
+        // /brokers/topics 获取集群下的所有主题
         logManager.startup(zkClient.getAllTopicsInCluster())
 
         remoteLogManagerOpt = createRemoteLogManager()
@@ -383,7 +382,7 @@ class KafkaServer(
           s"zk-broker-${config.nodeId}-",
           retryTimeoutMs = config.requestTimeoutMs.longValue
         )
-        //这里只是启动了线程 NodeToControllerRequestThread，还没开始发消息
+        //这里只是启动了线程 NodeToControllerRequestThread，还没开始发消息 这个时间还没拿到 Controller 的ip地址
         clientToControllerChannelManager.start()
 
         /* start forwarding manager */
@@ -424,7 +423,7 @@ class KafkaServer(
             brokerEpochSupplier = brokerEpochSupplier
           )
         } else {
-          // 这个会监控 isr 集合的变动，并将变动注册到zk 实现广播效果
+          // 这个会监控 isr 集合的变动，并将变动注册到zk 实现广播效果 周期性的发布isr变更情况
           AlterPartitionManager(kafkaScheduler, time, zkClient)
         }
         alterPartitionManager.start()
@@ -434,6 +433,7 @@ class KafkaServer(
         replicaManager.startup()
 
         val brokerInfo = createBrokerInfo
+        // 注册一个临时的节点：/brokers/ids/${brokerId}
         val brokerEpoch = zkClient.registerBroker(brokerInfo)
 
         /* start token manager */
@@ -541,7 +541,7 @@ class KafkaServer(
           metrics
         )
         // 里边有诸多和组操作的相关操作
-        groupCoordinator.startup(() => zkClient.getTopicPartitionCount(Topic.GROUP_METADATA_TOPIC_NAME).getOrElse(config.groupCoordinatorConfig.offsetsTopicPartitions))
+        groupCoordinat or.startup(() => zkClient.getTopicPartitionCount(Topic.GROUP_METADATA_TOPIC_NAME).getOrElse(config.groupCoordinatorConfig.offsetsTopicPartitions))
 
         /* create producer ids manager */
         val producerIdManager = if (config.interBrokerProtocolVersion.isAllocateProducerIdsSupported) {

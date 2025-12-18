@@ -69,6 +69,48 @@ import java.util.stream.Stream;
  * in the log provided it hasn't expired due to age.
  * This ensures that producer ids will not be expired until either the max expiration time has been reached,
  * or if the topic also is configured for deletion, the segment containing the last written offset has been deleted.
+ *
+ * ProducerStateManager 是 “分区维度的生产者状态管家”——
+ *  每个 TopicPartition 都有自己独立的一个，专门替 Broker 记住：
+ *      1.谁（PID）
+ *      2.发到哪（sequence）
+ *      3.有没有开事务（txnFirstOffset）
+ *
+ * | 字段                                        | 作用                                    |
+ * | ------------------------------------------ | ------------------------------------- |
+ * | `producers: Map[Long, ProducerStateEntry]` | **key = 生产者ID(PID)**，value = 该生产者当前状态 |
+ * | `ongoingTxns`                              | **尚未提交/回滚的事务**（key = 事务第一条 offset）    |
+ * | `unreplicatedTxns`                         | **已完结但还未被所有副本复制的事务**                  |
+ * | `lastMapOffset`                            | **状态表已处理到的最大 offset**                 |
+ * | `lastSnapOffset`                           | **最近一次快照的 offset**                    |
+ *
+ * | 方法                          | 通俗解释                                  |
+ * | --------------------------- | ------------------------------------- |
+ * | `prepareUpdate(pid)`        | 写日志前 **拿票**：检查 Sequence、Epoch 是否合法    |
+ * | `update(appendInfo)`        | 写完后 **存档**：更新 Sequence、事务状态           |
+ * | `findDuplicateBatch(batch)` | **幂等守门员**：Sequence 已存在 → 直接返回重复，不再写日志 |
+ * | `truncateAndReload(...)`    | **灾后重建**：按快照 + 日志重放，补回所有 PID 状态       |
+ *
+ * 生命周期事件：
+ * | 事件            | ProducerStateManager 做的事                                             |
+ * | ------------- | -------------------------------------------------------------------- |
+ * | **生产者第一次写**   | 分配新 `ProducerStateEntry`，记录 PID、Epoch、Sequence=0                     |
+ * | **每批消息追加**    | 校验 **Sequence 必须连续**；**重复/跳号直接拒绝**；更新 `lastSequence`                 |
+ * | **事务开始**      | 把 `currentTxnFirstOffset` 设为 **本批 baseOffset**                       |
+ * | **事务提交/回滚**   | 把该事务从 `ongoingTxns` 移到 `unreplicatedTxns`，清空 `currentTxnFirstOffset` |
+ * | **Broker 重启** | 从 **.snapshot 文件 + 日志段** 重放，恢复所有 PID 的序列号、事务状态                       |
+ * | **日志段滚动**     | 把内存表写一份 **.snapshot** 到磁盘，下次重启秒加载                                    |
+ *
+ * 客户端重试场景
+ *  生产者 PID=100 序列为 5-9 的 batch 因网络丢包重发
+ *  Broker 通过 findDuplicateBatch 发现 5-9 已存在 → 直接返回成功，不写二次日志，消费者也不会读到重复。
+ * 事务场景
+ *  PID=200 开启事务，第一条 offset=12345
+ *  currentTxnFirstOffset = Some(12345)
+ *  后续所有写操作都属于该事务，直到收到 EndTxn → 提交/回滚 → currentTxnFirstOffset = None
+ *
+ * “分区级的幂等 + 事务小账本”：
+ *  记住每个生产者的序号、事务进度，重试时去重，崩溃后恢复，让 Kafka 对客户端实现“只跑一次”与“原子提交”。
  */
 public class ProducerStateManager {
 
@@ -120,6 +162,7 @@ public class ProducerStateManager {
     // 作用场景：ongoingTxns 用于存储当前正在进行中的事务的元数据。这些事务可能已经开始，但尚未完成提交或回滚。
     //具体用途：事务协调器使用 ongoingTxns 来跟踪和管理正在进行中的事务。当事务开始时，相关的信息会被添加到 ongoingTxns 中。
     // 事务协调器会根据事务的状态变化（如准备提交、准备回滚等），更新 ongoingTxns 中的记录。一旦事务完成（提交或回滚），相关的条目会被从 ongoingTxns 中移除。
+    // TreeMap是有序的，这里是 offset->TxnMetadata的映射，也就代表的 offset最小的事物是第一个
     private final TreeMap<Long, TxnMetadata> ongoingTxns = new TreeMap<>();
 
     // completed transactions whose markers are at offsets above the high watermark
@@ -134,7 +177,7 @@ public class ProducerStateManager {
     private volatile int producerIdCount = 0;
 
     // Keep track of the last timestamp from the oldest transaction. This is used
-    // to detect (approximately) when a transaction has been left hanging on a partition.
+    // to detect (approximately) when a transaction has been left hanging on a partition. 一个事务被挂在分区上。
     // We make the field volatile so that it can be safely accessed without a lock.
     private volatile long oldestTxnLastTimestamp = -1L;
 
@@ -235,7 +278,8 @@ public class ProducerStateManager {
      * but not to remove the largest stray(偏离的) snapshot file which was emitted(发出的) during clean shutdown.
      */
     public void removeStraySnapshots(Collection<Long> segmentBaseOffsets) throws IOException {
-        OptionalLong maxSegmentBaseOffset = segmentBaseOffsets.isEmpty() ? OptionalLong.empty() : OptionalLong.of(segmentBaseOffsets.stream().max(Long::compare).get());
+        OptionalLong maxSegmentBaseOffset = segmentBaseOffsets.isEmpty()
+                ? OptionalLong.empty() : OptionalLong.of(segmentBaseOffsets.stream().max(Long::compare).get());
 
         HashSet<Long> baseOffsets = new HashSet<>(segmentBaseOffsets);
         Optional<SnapshotFile> latestStraySnapshot = Optional.empty();
@@ -336,7 +380,8 @@ public class ProducerStateManager {
                 SnapshotFile snapshot = latestSnapshotFileOptional.get();
                 try {
                     log.info("Loading producer state from snapshot file '{}'", snapshot);
-                    Stream<ProducerStateEntry> loadedProducers = readSnapshot(snapshot.file()).stream().filter(producerEntry -> !isProducerExpired(currentTime, producerEntry));
+                    Stream<ProducerStateEntry> loadedProducers = readSnapshot(snapshot.file()).stream()
+                            .filter(producerEntry -> !isProducerExpired(currentTime, producerEntry));
                     loadedProducers.forEach(this::loadProducerEntry);
                     lastSnapOffset = snapshot.offset;
                     lastMapOffset = lastSnapOffset;
@@ -363,7 +408,8 @@ public class ProducerStateManager {
     }
 
     private boolean isProducerExpired(long currentTimeMs, ProducerStateEntry producerState) {
-        return !producerState.currentTxnFirstOffset().isPresent() && currentTimeMs - producerState.lastTimestamp() >= producerStateManagerConfig.producerIdExpirationMs();
+        return !producerState.currentTxnFirstOffset().isPresent()
+                && currentTimeMs - producerState.lastTimestamp() >= producerStateManagerConfig.producerIdExpirationMs();
     }
 
     /**
@@ -380,7 +426,8 @@ public class ProducerStateManager {
     }
 
     /**
-     * Truncate(截断) the producer id mapping to the given offset range and reload the entries from the most recent snapshot in range (if there is one).
+     * Truncate(截断) the producer id mapping to the given offset range
+     * and reload the entries from the most recent snapshot in range (if there is one).
      * We delete snapshot files prior to the logStartOffset but do not remove producer state from the map.
      * This means that in-memory and on-disk state can diverge(分歧，背离),
      * and in the case of broker failover or unclean shutdown, any in-memory state not persisted in the snapshots will be lost,
@@ -397,6 +444,16 @@ public class ProducerStateManager {
             }
         }
 
+        /**
+         * | 场景                            | 过程描述                                                                               | 结果                          |
+         * | ----------------------         | ---------------------------------------------------------                            | --------------------------- |
+         * | **Broker 异常崩溃**             | 崩溃瞬间日志写入了新数据，但 **内存状态没来得及打快照**；重启后 logEndOffset 比最后一次快照高。 | logEndOffset > mapEndOffset |
+         * | **日志截断（truncate）后又追加** | 截断把日志尾部删掉，随后继续写入；状态表里的 mapEndOffset 还停留在“被截断的位置”。             | logEndOffset > mapEndOffset |
+         * | **第一次启用事务/幂等**         | 旧日志没有事务标记，新日志开始写事务数据；状态表是空的（mapEndOffset=0）。                    | logEndOffset > mapEndOffset |
+         *
+         * 内存表已不可靠，干脆推倒重来！”
+         * 这样保证 PID、sequence、事务状态 与日志 100% 对齐。
+         */
         if (logEndOffset != mapEndOffset()) {
             clearProducerIds();
             ongoingTxns.clear();
@@ -406,7 +463,7 @@ public class ProducerStateManager {
             // safe to clear the un replicated(复制) transactions
             unreplicatedTxns.clear();
             loadFromSnapshot(logStartOffset, currentTimeMs);
-        } else {
+        } else { // 说明 快照已覆盖到日志末尾，只需把 logStartOffset 之后、快照之前 的旧快照文件删掉即可，无需重扫日志，快速轻量。
             onLogStartOffsetIncremented(logStartOffset);
         }
     }
@@ -440,6 +497,7 @@ public class ProducerStateManager {
 
     private void updateOldestTxnTimestamp() {
         Map.Entry<Long, TxnMetadata> firstEntry = ongoingTxns.firstEntry();
+        // 没有处理的事物
         if (firstEntry == null) {
             oldestTxnLastTimestamp = -1;
         } else {
@@ -473,6 +531,7 @@ public class ProducerStateManager {
     public Optional<File> takeSnapshot(boolean sync) throws IOException {
         // If not a new offset, then it is not worth taking another snapshot
         if (lastMapOffset > lastSnapOffset) {
+            // offset.snapshot
             SnapshotFile snapshotFile = new SnapshotFile(LogFileUtils.producerSnapshotFile(logDir, lastMapOffset));
             long start = time.hiResClockMs();
             writeSnapshot(snapshotFile.file(), producers, sync);
@@ -585,6 +644,27 @@ public class ProducerStateManager {
             throw new IllegalArgumentException("Attempted to complete transaction " + completedTxn + " on partition "
                     + topicPartition + " which was not started");
 
+        /**
+         * 把 事务的“收尾偏移” 补录到 metadata 里，告诉 Broker：这条事务写到哪一行才结束。
+         * 只有补上这个值，后续才能准确计算“已提交但未复制”区间，也能正确更新 LSO（Log Start Offset）和 HW（High Watermark）
+         * BEGIN 时只写头，END 时才补尾，有了首尾，Broker 才能精确推进 LSO、维护事务索引、保证 read-committed 语义。
+         *
+         * 背景：事务的两段式记录
+         *  | 阶段               | 记录内容                         | 存储位置          |
+         *  | ---------------- | ------------------------         | ------------- |
+         *  | **BEGIN**        | `firstOffset`（事务第一条消息偏移） | `ongoingTxns` |
+         *  | **COMMIT/ABORT** | `lastOffset`（控制消息自身偏移）   | **此时才产生，需补录** |
+         * 为什么 BEGIN 时不写 lastOffset
+         *  事务开始那一刻 不知道会写多少条，lastOffset = -1（OptionalLong.empty()）。
+         *  只有 收到 EndTxn(COMMIT/ABORT) 控制批 时，控制消息被追加到日志，它的 offset 才成为“事务最后一条”
+         * 补录后用来做什么
+         *  | 用途                            | 说明                                                        |
+         *  | -------------------------      | --------------------------------------------------------- |
+         *  | **计算事务长度**                 | `lastOffset - firstOffset + 1` → 用于 LSO 推进、副本截断           |
+         *  | **构建 CompletedTxn 对象**      | 上层 `completeTxn()` 需要 **首尾偏移** 才能更新 **LSO、HW、事务索引**       |
+         *  | **生成事务索引 (.txnindex)**    | 需要 **首尾偏移** 写入索引项，供 **read-committed 消费者** 快速跳过/保留        |
+         *  | **unreplicatedTxns 后续清理**  | 当 **所有 ISR 都复制过 lastOffset** 后，事务才从 `unreplicatedTxns` 移除 |
+         */
         txnMetadata.lastOffset = OptionalLong.of(completedTxn.lastOffset);
         unreplicatedTxns.put(completedTxn.firstOffset, txnMetadata);
         updateOldestTxnTimestamp();
@@ -732,6 +812,7 @@ public class ProducerStateManager {
     }
 
     private static boolean isSnapshotFile(Path path) {
+        // .snapshot
         return Files.isRegularFile(path) && path.getFileName().toString().endsWith(LogFileUtils.PRODUCER_SNAPSHOT_FILE_SUFFIX);
     }
 

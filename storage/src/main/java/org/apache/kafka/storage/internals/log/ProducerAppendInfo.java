@@ -148,7 +148,7 @@ public class ProducerAppendInfo {
     }
 
     public Optional<CompletedTxn> append(RecordBatch batch, Optional<LogOffsetMetadata> firstOffsetMetadataOpt) {
-        if (batch.isControlBatch()) {
+        if (batch.isControlBatch()) { // 这里肯定对应一个事物的控制标记
             Iterator<Record> recordIterator = batch.iterator();
             if (recordIterator.hasNext()) {
                 Record record = recordIterator.next();

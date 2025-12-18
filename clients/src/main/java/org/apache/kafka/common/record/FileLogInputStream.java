@@ -59,35 +59,55 @@ public class FileLogInputStream implements LogInputStream<FileLogInputStream.Fil
         this.end = end;
     }
 
+    /**
+     * 从磁盘字节流里一个接一个地把 RecordBatch 对象挖出来” 的底层迭代器实现——
+     *      零拷贝、逐条校验、自动区分新老格式，直到文件末尾返回 null。
+     *
+     *  position → 读17B头 → 解析offset/size → 校验大小 → 判magic → 建batch → position前移
+     *      ↑        ↑            ↑           ↑         ↑         ↑
+     *   边界 guard  固定常量   最小合法     剩余足够   格式分支  迭代推进
+     *
+     * nextBatch() 就是 “磁盘字节流 → RecordBatch 对象” 的 最小化、零拷贝、格式自适应 迭代器：
+     *  读17B头 → 校验 → 按magic分流 → 推进position，
+     *  每条消息一个循环，直到文件尾优雅返回 null。
+     *
+     * @return
+     * @throws IOException
+     */
     @Override
     public FileChannelRecordBatch nextBatch() throws IOException {
         FileChannel channel = fileRecords.channel();
+        // 剩余字节不够 17 字节固定头 → 肯定没完整消息了，直接结束。
         if (position >= end - HEADER_SIZE_UP_TO_MAGIC)
             return null;
 
+        // 一次 DMA 读 17 字节 进 logHeaderBuffer，后续全部 按偏移量常量 解析，零拷贝。
         logHeaderBuffer.rewind();
         Utils.readFullyOrFail(channel, logHeaderBuffer, position, "log header");
 
         logHeaderBuffer.rewind();
-        long offset = logHeaderBuffer.getLong(OFFSET_OFFSET);
-        int size = logHeaderBuffer.getInt(SIZE_OFFSET);
+        long offset = logHeaderBuffer.getLong(OFFSET_OFFSET); // offset：这条消息在分区里的逻辑序号
+        int size = logHeaderBuffer.getInt(SIZE_OFFSET); // size：整条消息体长度（不含这 12 字节头）
 
-        // V0 has the smallest overhead, stricter checking is done later
+        // V0 has the smallest overhead, stricter checking is done later 最小合法体积过滤，防止后续读越界或 SIGBUS
         if (size < LegacyRecord.RECORD_OVERHEAD_V0)
             throw new CorruptRecordException(String.format("Found record size %d smaller than minimum record " +
                             "overhead (%d) in file %s.", size, LegacyRecord.RECORD_OVERHEAD_V0, fileRecords.file()));
 
+        // 剩余文件不够装下整条消息 → 文件尾巴腐败，优雅结束迭代。
         if (position > end - LOG_OVERHEAD - size)
             return null;
 
         byte magic = logHeaderBuffer.get(MAGIC_OFFSET);
         final FileChannelRecordBatch batch;
 
-        if (magic < RecordBatch.MAGIC_VALUE_V2)
+        // 返回的 batch 对象内部只持有 (offset, magic, fileChannel, position, size)——仍然零拷贝，真正的字节解析延迟到第一次访问时才发生。
+        if (magic < RecordBatch.MAGIC_VALUE_V2) // magic=0/1 → 老版 消息级格式（Legacy）
             batch = new LegacyFileChannelRecordBatch(offset, magic, fileRecords, position, size);
-        else
+        else // magic=2 → 新版 批量格式（RecordBatch，支持事务、压缩、幂等）
             batch = new DefaultFileChannelRecordBatch(offset, magic, fileRecords, position, size);
 
+        // position 永远指向下一条消息头起始，下次循环继续
         position += batch.sizeInBytes();
         return batch;
     }

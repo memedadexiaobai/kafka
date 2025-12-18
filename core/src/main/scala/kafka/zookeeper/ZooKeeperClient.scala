@@ -46,7 +46,7 @@ object ZooKeeperClient {
 
 /**
  * A ZooKeeper client that encourages pipelined requests.
- *
+ * 底层操作Zookeeper的接口，持有 Zookeeper的连接实例，封装操作类 ZkOp、 请求类 AsyncRequest 、 响应对象类 AsyncResponse、异常对象 ZooKeeperClientException
  * @param connectString comma separated host:port pairs, each corresponding to a zk server
  * @param sessionTimeoutMs session timeout in milliseconds
  * @param connectionTimeoutMs connection timeout in milliseconds
@@ -112,6 +112,7 @@ class ZooKeeperClient(connectString: String,
   metricNames += "SessionState"
 
   reinitializeScheduler.startup()
+
   try waitUntilConnected(connectionTimeoutMs, TimeUnit.MILLISECONDS)
   catch {
     case e: Throwable =>
@@ -140,6 +141,8 @@ class ZooKeeperClient(connectString: String,
    * The watch flag on each outgoing request will be set if we've already registered a handler for the
    * path associated with the request.
    *
+   * 批量操作的请求和处理机制
+   *
    * @param requests a sequence of requests to send and wait on.
    * @return the responses for the requests. If all requests have the same type, the responses will have the respective
    * response type (e.g. Seq[CreateRequest] -> Seq[CreateResponse]). Otherwise, the most specific common supertype
@@ -153,8 +156,10 @@ class ZooKeeperClient(connectString: String,
       val responseQueue = new ArrayBlockingQueue[Req#Response](requests.size)
 
       requests.foreach { request =>
+        //通过信号量机制来进行限流
         inFlightRequests.acquire()
         try {
+          // 发生请求的时候用的 读锁 加大并发 再初始化连接时候使用写锁，避免在初始化连接的时候处理请求
           inReadLock(initializationLock) {
             send(request) { response =>
               responseQueue.add(response)
@@ -460,6 +465,14 @@ class ZooKeeperClient(connectString: String,
   }
 }
 
+/**
+ * “会话管家”
+ *   监听 ZooKeeper 会话级事件：连接、断线、重连、过期。
+ *   全局唯一，在 Broker 启动时注册，与 Controller 选举强绑定。
+ *   典型回调：
+ *    afterInitializingSession() → 重连后重新竞选 Controller
+ *    beforeInitializingSession() → 过期前主动辞职、清空待处理事件
+ */
 trait StateChangeHandler {
   val name: String
   def beforeInitializingSession(): Unit = {}
@@ -467,6 +480,15 @@ trait StateChangeHandler {
   def onAuthFailure(): Unit = {}
 }
 
+/**
+ * “节点内容/存在性监听器”
+ *  监听 某个具体 ZNode 的“数据变更”或“节点被删/创建”（即 NodeDataChanged、NodeDeleted、NodeCreated）。
+ *  每个节点一个实例，注册路径如 /admin/reassign_partitions、/admin/preferred_replica_election。
+ *  典型用途：
+ *    分区重分配任务 → /admin/reassign_partitions 出现即触发 PartitionReassignmentHandler
+ *    Preferred Leader 选举 → /admin/preferred_replica_election 出现即触发 PreferredReplicaElectionHandler
+ *  只关心 “文件本身” 的写/删事件
+ */
 trait ZNodeChangeHandler {
   val path: String
   def handleCreation(): Unit = {}
@@ -474,10 +496,29 @@ trait ZNodeChangeHandler {
   def handleDataChange(): Unit = {}
 }
 
+/**
+ * “子节点列表监听器”
+ *    监听 某个目录节点下子节点的增删（NodeChildrenChanged），不 care 数据内容。
+ *    每个目录一个实例，注册路径如 /brokers/ids、/admin/delete_topics、/isr_change_notification。
+ *    典型用途：
+ *      Broker 上下线 → /brokers/ids 子节点变化 → BrokerChangeHandler
+ *      主题删除任务 → /admin/delete_topics 子节点新增 → TopicDeletionHandler
+ *      ISR 变更通知 → /isr_change_notification 子节点新增 → IsrChangeNotificationHandler
+ *    只关心 “目录里的孩子” 数量变化
+ */
 trait ZNodeChildChangeHandler {
   val path: String
   def handleChildChange(): Unit = {}
 }
+
+/**
+ * | Handler 类型                 | 监听事件                 | 典型路径                                    | 用途示例                       | 注册接口                                          |
+ * | --------------------------- | --------------          | ---------------------------------------   | ----------------------        | --------------------------------------------- |
+ * | **StateChangeHandler**      | 会话连接、过期、重连       | 全局                                      | Controller 重新选举、会话过期辞职 | `registerStateChangeHandler`                  |
+ * | **ZNodeChangeHandler**      | 节点数据变更/节点被删/创建 | `/admin/reassign_partitions` 等          | 重分配任务、Preferred 选举        | `registerZNodeChangeHandlerAndCheckExistence` |
+ * | **ZNodeChildChangeHandler** | 子节点增删（列表变化）    | `/brokers/ids`、`/admin/delete_topics` 等 | Broker 上下线、主题删除、ISR 变更 | `registerZNodeChildChangeHandler`             |
+ * StateChangeHandler 管“生命线”，ZNodeChangeHandler 管“文件内容”，ZNodeChildChangeHandler 管“目录孩子”——三套监听器各司其职，共同支撑 Kafka 在 ZooKeeper 模式下的 高可靠元数据事件驱动 架构
+ */
 
 // Thin wrapper for zookeeper.Op
 sealed trait ZkOp {

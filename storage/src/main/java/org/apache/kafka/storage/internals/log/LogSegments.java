@@ -241,6 +241,11 @@ public class LogSegments {
      * @return An iterator to all segments
      * beginning with the segment that includes "from"
      * and ending with the segment that includes up to(达到，接近于) "to-1" or the end of the log (if to > end of log).
+     *
+     * | 方法                                                   | 区间语义                | 是否含 fromKey       | 是否含 toKey       |
+     * | ---------------------------------------------------- | ------------------- | ----------------- | --------------- |
+     * | `headMap(toKey, inclusive)`                          | 从头到 `toKey`         | ×                 | 由 `inclusive`   |
+     * | `subMap(fromKey, fromInclusive, toKey, toInclusive)` | `fromKey` ~ `toKey` | 由 `fromInclusive` | 由 `toInclusive` |
      */
     public Collection<LogSegment> values(long from, long to) {
         if (from == to) {
@@ -301,6 +306,17 @@ public class LogSegments {
      * if it exists.
      *
      * This method is thread-safe.
+     *
+     * lowerEntry 是 ConcurrentNavigableMap 的“小于查询键的最大键值对”方法——
+     * 通俗讲：“给我比它小、但又最接近它的那个条目！”
+     * 返回 严格小于 key 的 最大 键值对； 没有就返回 null；
+     * | 方法                  | 含义                  |
+     * | ------------------- | ------------------- |
+     * | `lowerEntry(key)`   | **严格小于** key 的最大条目  |
+     * | `floorEntry(key)`   | **小于或等于** key 的最大条目 |
+     * | `higherEntry(key)`  | **严格大于** key 的最小条目  |
+     * | `ceilingEntry(key)` | **大于或等于** key 的最小条目 |
+     *
      */
     public Optional<LogSegment> lowerSegment(long offset) {
         return lowerEntry(offset).map(Map.Entry::getValue);

@@ -63,7 +63,7 @@ case class LeaderAndIsr(
   leaderRecoveryState: LeaderRecoveryState,
   isrWithBrokerEpoch: List[BrokerState],
   // The current epoch for the partition for KRaft controllers.
-  // The current ZK version for the legacy controllers.
+  // The current ZK version for the legacy(遗产，遗留) controllers.
   // The epoch is a monotonically(单调) increasing value which is incremented after every partition change.
   partitionEpoch: Int
 ) {

@@ -54,6 +54,32 @@ public interface Records extends TransferableRecords {
     int MAGIC_OFFSET = LOG_OVERHEAD + 4;
     int MAGIC_LENGTH = 1;
     int HEADER_SIZE_UP_TO_MAGIC = MAGIC_OFFSET + MAGIC_LENGTH;
+    /**
+     * 总结下上边的：
+     * Kafka 消息头（Log Overhead + Header Up-to-Magic）的“二进制地图”——
+     *  用常量精确标出每个字段在消息字节流里的起始位置和长度，保证 零拷贝解析时不会多读一字节，也不会错位一位
+     *
+     * | 常量                         | 偏移量（字节） | 长度（字节） | 含义                          |
+     * | -------------------------   | -------      | ------     | --------------------------- |
+     * | `OFFSET_OFFSET`             | 0            | 8          | **消息在分区里的逻辑偏移量**（Long）      |
+     * | `SIZE_OFFSET`               | 8            | 4          | **消息体长度**（Int）              |
+     * | `LOG_OVERHEAD`              | 12           | ——         | **前两部分总和 = 12 字节**，即“日志层开销” |
+     * | *(4 字节保留区)*             | 12~16        | 4          | **版本相关保留**，不同消息格式可复用        |
+     * | `MAGIC_OFFSET`             | 16           | 1          | **消息格式版本号**（Magic Byte）     |
+     * | `HEADER_SIZE_UP_TO_MAGIC`  | 17           | ——         | **从开头到 Magic 的总长度 = 17 字节** |
+     *
+     * 0        8        12       16       17
+     * ├─offset─├─size───├─4B保留─├─magic──├► 后续格式变长区域
+     *  8B       4B       4B       1B
+     * 优势：
+     *  固定前置：偏移 + 大小 + 保留 + Magic 共 17 字节，所有当前格式共用，解析时 先读 Magic 就能知道后续可变部分怎么解
+     *  零拷贝定位：
+     *      FileRecords.readAt(offset) 可以直接 buffer.position(absolute + HEADER_SIZE_UP_TO_MAGIC) 跳到 Magic，无需反序列化整个消息
+     *  向前兼容：
+     *      新增字段只放在 Magic 之后，Magic 偏移永远 16，老代码不会错位
+     *
+     * 用 17 字节固定前缀把 Magic 钉死在偏移 16，后续解析 先读 Magic → 再按版本解剩余，保证 零拷贝、高兼容、不错位。
+     */
 
     /**
      * Get the record batches. Note that the signature allows subclasses
