@@ -846,7 +846,9 @@ class GroupMetadataManager(brokerId: Int,
   // visible for testing
   private[group] def cleanupGroupMetadata(): Unit = {
     val currentTimestamp = time.milliseconds()
-    val numOffsetsRemoved = cleanupGroupMetadata(groupMetadataCache.values, RequestLocal.NoCaching,
+    val numOffsetsRemoved = cleanupGroupMetadata(groupMetadataCache.values,
+      RequestLocal.NoCaching,
+      // _. 是 Scala 中的一种简写方式，用于表示一个匿名函数。等价于 (groupMetadata: GroupMetadata) => groupMetadata.removeExpiredOffsets(currentTimestamp, config.offsetsRetentionMs)。
       _.removeExpiredOffsets(currentTimestamp, config.offsetsRetentionMs))
     offsetExpiredSensor.record(numOffsetsRemoved)
     if (numOffsetsRemoved > 0)

@@ -41,7 +41,7 @@ public class BuiltInPartitioner {
     private final String topic;
     private final int stickyBatchSize;
 
-    private volatile PartitionLoadStats partitionLoadStats = null;
+    private volatile PartitionLoadStats partitionLoadStats = null; // 分区负载统计信息，用于动态调整分区选择策略。
     private final AtomicReference<StickyPartitionInfo> stickyPartitionInfo = new AtomicReference<>();
 
 
@@ -64,7 +64,7 @@ public class BuiltInPartitioner {
      * Calculate the next partition for the topic based on the partition load stats.
      */
     private int nextPartition(Cluster cluster) {
-        int random = randomPartition();
+        int random = randomPartition(); // 用于均匀分布或加权随机选择。
 
         // Cache volatile variable in local variable.
         PartitionLoadStats partitionLoadStats = this.partitionLoadStats;
@@ -72,7 +72,7 @@ public class BuiltInPartitioner {
 
         if (partitionLoadStats == null) {
             // We don't have stats to do adaptive partitioning (or it's disabled), just switch to the next
-            // partition based on uniform distribution.
+            // partition based on uniform distribution(词组：均匀分布).
             List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
             if (!availablePartitions.isEmpty()) {
                 partition = availablePartitions.get(random % availablePartitions.size()).partition();
@@ -82,26 +82,52 @@ public class BuiltInPartitioner {
                 partition = random % partitions.size();
             }
         } else {
-            // Calculate next partition based on load distribution.
+            // Calculate next partition based on load distribution(分布). 负载分布
             // Note that partitions without leader are excluded from the partitionLoadStats.
+            // 通过累积频率表和加权随机选择，实现了基于分区负载的动态分区选择逻辑。
             assert partitionLoadStats.length > 0;
 
+            /**
+             * 作用：获取分区负载统计的累积频率表。
+             * 细节：cumulativeFrequencyTable 是一个整型数组，存储了按分区负载排序后的累积频率值。这些值用于表示每个分区的相对负载，后续会根据这些频率进行加权随机选择。
+             */
             int[] cumulativeFrequencyTable = partitionLoadStats.cumulativeFrequencyTable;
+            /**
+             * 作用：根据累积频率的总和计算一个加权随机值。
+             * 细节：
+             *  random 是一个随机数，用于引入随机性。
+             *  cumulativeFrequencyTable[partitionLoadStats.length - 1] 是累积频率表的最后一个元素，表示所有分区负载的总和。
+             *  weightedRandom 是对总和取模后的结果，用于确保随机值落在累积频率的范围内。这个值将用于在累积频率表中查找对应的分区。
+             */
             int weightedRandom = random % cumulativeFrequencyTable[partitionLoadStats.length - 1];
 
-            // By construction, the cumulative frequency table is sorted, so we can use binary
-            // search to find the desired index.
+            /**
+             * By construction(构造), the cumulative frequency table is sorted, so we can use binary search to find the desired index.
+             * 作用：在累积频率表中查找 weightedRandom 值的位置。
+             * 细节：
+             *   使用二分查找算法在 cumulativeFrequencyTable 的指定范围内查找 weightedRandom。
+             *   如果找到确切的匹配项，searchResult 是该值的索引。
+             *   如果没有找到确切的匹配项，返回值为 -(insertion point) - 1，其中 insertion point 是该值应插入的位置，以保持数组的有序性。
+             */
             int searchResult = Arrays.binarySearch(cumulativeFrequencyTable, 0, partitionLoadStats.length, weightedRandom);
 
-            // binarySearch results the index of the found element, or -(insertion_point) - 1
-            // (where insertion_point is the index of the first element greater than the key).
-            // We need to get the index of the first value that is strictly greater, which
-            // would be the insertion point, except if we found the element that's equal to
-            // the searched value (in this case we need to get next).  For example, if we have
-            //  4 5 8
-            // and we're looking for 3, then we'd get the insertion_point = 0, and the function
-            // would return -0 - 1 = -1, by adding 1 we'd get 0.  If we're looking for 4, we'd
-            // get 0, and we need the next one, so adding 1 works here as well.
+            /**
+             * binarySearch results the index of the found element, or -(insertion_point) - 1
+             * (where insertion_point is the index of the first element greater than the key).
+             * We need to get the index of the first value that is strictly(严格) greater, which
+             * would be the insertion point, except if we found the element that's equal to
+             * the searched value (in this case we need to get next).  For example, if we have
+             *  4 5 8
+             * and we're looking for 3, then we'd get the insertion_point = 0, and the function
+             * would return -0 - 1 = -1, by adding 1 we'd get 0.  If we're looking for 4, we'd
+             *  get 0, and we need the next one, so adding 1 works here as well.
+             *
+             * 作用：根据查找结果计算分区索引。
+             * 细节：
+             *  searchResult + 1 是为了调整二分查找的返回值，以获取正确的分区索引。
+             *  Math.abs 确保结果为非负数，避免数组索引出现负值。
+             *  partitionIndex 是最终确定的分区索引，用于选择目标分区。
+             */
             int partitionIndex = Math.abs(searchResult + 1);
             assert partitionIndex < partitionLoadStats.length;
             partition = partitionLoadStats.partitionIds[partitionIndex];
@@ -145,7 +171,7 @@ public class BuiltInPartitioner {
         if (partitionInfo != null)
             return partitionInfo;
 
-        // We're the first to create it.
+        // We're the first to create it. Sticky：黏性
         partitionInfo = new StickyPartitionInfo(nextPartition(cluster));
         if (stickyPartitionInfo.compareAndSet(null, partitionInfo))
             return partitionInfo;
@@ -331,10 +357,10 @@ public class BuiltInPartitioner {
     }
 
     /**
-     * The partition load stats for each topic that are used for adaptive partition distribution.
+     * The partition load stats for each topic that are used for adaptive(自适应的) partition distribution.
      */
     private static final class PartitionLoadStats {
-        public final int[] cumulativeFrequencyTable;
+        public final int[] cumulativeFrequencyTable; // 累积频数表
         public final int[] partitionIds;
         public final int length;
 

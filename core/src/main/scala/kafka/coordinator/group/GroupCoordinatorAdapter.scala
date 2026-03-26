@@ -63,7 +63,7 @@ object GroupCoordinatorAdapter {
 private[group] class GroupCoordinatorAdapter(
   private val coordinator: GroupCoordinator,
   private val time: Time
-) extends org.apache.kafka.coordinator.group.GroupCoordinator {
+) extends org.apache.kafka.coordinator.group.GroupCoordinator { //内部的一个Java接口API
 
   override def consumerGroupHeartbeat(
     context: RequestContext,

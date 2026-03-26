@@ -79,7 +79,7 @@ import java.util.stream.Collectors;
  * functionality for accessing configs.
  *
  * 顾名思义：配置定义，内部提供了三个主要的属性：
- *  configKeys用于存放 配置名 -> 配置信息 的映射
+ *  configKeys：用于存放 配置名 -> 配置信息 的映射
  *  groups：存放所有的配置组名
  *  configsWithNoParent：存放没有依赖的配置名
  * 内部核心类：ConfigKey 用于存放配置信息

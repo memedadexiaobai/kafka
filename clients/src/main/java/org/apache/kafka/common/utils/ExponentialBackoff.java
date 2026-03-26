@@ -20,7 +20,7 @@ package org.apache.kafka.common.utils;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * A utility class for keeping the parameters and providing the value of exponential
+ * A utility class for keeping the parameters and providing the value of exponential(指数)
  * retry backoff, exponential reconnect backoff, exponential timeout, etc.
  * <p>
  * The formula is:
@@ -33,10 +33,10 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public class ExponentialBackoff {
     private final long initialInterval;
-    private final int multiplier;
+    private final int multiplier;//乘数
     private final long maxInterval;
-    private final double jitter;
-    private final double expMax;
+    private final double jitter; //抖动 波动
+    private final double expMax; //经验最大值
 
     public ExponentialBackoff(long initialInterval, int multiplier, long maxInterval, double jitter) {
         this.initialInterval = Math.min(maxInterval, initialInterval);

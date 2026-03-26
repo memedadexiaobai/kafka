@@ -90,7 +90,7 @@ class TopicDeletionManager(config: KafkaConfig,
                            partitionStateMachine: PartitionStateMachine,
                            client: DeletionClient) extends Logging {
   this.logIdent = s"[Topic Deletion Manager ${config.brokerId}] "
-  val isDeleteTopicEnabled: Boolean = config.deleteTopicEnable
+  val isDeleteTopicEnabled: Boolean = config.deleteTopicEnable // delete.topic.enable
 
   def init(initialTopicsToBeDeleted: Set[String], initialTopicsIneligibleForDeletion: Set[String]): Unit = {
     info(s"Initializing manager with initial deletions: $initialTopicsToBeDeleted, " +
@@ -114,6 +114,46 @@ class TopicDeletionManager(config: KafkaConfig,
       controllerContext.topicsIneligibleForDeletion ++= initialTopicsIneligibleForDeletion & controllerContext.topicsToBeDeleted
     } else {
       // if delete topic is disabled clean the topic entries under /admin/delete_topics
+      /**
+       * 清理无效的删除请求
+       * 🔍 为什么要删除 ZooKeeper 节点？
+       *  场景 1：用户误操作或配置变更
+       *   # 第 1 天：delete.topic.enable = true (默认开启)
+       *   # 用户执行删除命令
+       *   kafka-topics.sh --delete --topic topic-A
+       *
+       *   # ZooKeeper 创建节点：/admin/delete_topics/topic-A
+       *   # 但此时 Broker 宕机，删除未完成...
+       *
+       *   # 第 2 天：管理员修改配置 delete.topic.enable = false
+       *   # Broker 重启，TopicDeletionManager 初始化
+       *  如果不删除 ZooKeeper 节点会怎样？
+       *   // ❌ 问题 1：每次 Controller 启动都会尝试处理删除请求
+       *   processTopicDeletion() {
+       *   topicsToBeDeleted = zkClient.getTopicDeletions  // ["topic-A"]
+       *
+       *   if (config.deleteTopicEnable) {
+       *    // 这个分支不会执行（因为配置为 false）
+       *   } else {
+       *     // 每次都执行这里，但什么都不做，只是打印日志
+       *    info(s"Removing $topicsToBeDeleted since delete topic is disabled")
+       *     zkClient.deleteTopicDeletions(...)  // 删除节点
+       *   }
+       *   }
+       *
+       *   // ❌ 问题 2：ZooKeeper Watcher 会持续触发
+       *   // 每次有 /admin/delete_topics 的子节点变化，都会触发监听器
+       *   // 导致无意义的日志和性能开销
+       *
+       * | 场景 | 删除 ZooKeeper 节点 ✅ | 不删除 ZooKeeper 节点 ❌ |
+       * |------|----------------------|------------------------|
+       * | **Controller 重启** | 只清理一次，干净利落 | 每次都触发，反复打印日志 |
+       * | **ZooKeeper Watcher** | 不会触发（节点已删除） | 持续触发（子节点变化） |
+       * | **集群状态一致性** | ZK 与 Broker 状态一致 | ZK 有删除请求，但 Broker 不处理 |
+       * | **运维排查** | 清楚表明"删除功能已禁用" | 看起来像"删除卡住了"，误导排查 |
+       *
+       * kafka是根据/admin/delete_topics来判断需要删除的主题的，删除被禁用，这个节点也没存在的必要了
+       */
       info(s"Removing $initialTopicsToBeDeleted since delete topic is disabled")
       client.deleteTopicDeletions(initialTopicsToBeDeleted.toSeq, controllerContext.epochZkVersion)
     }

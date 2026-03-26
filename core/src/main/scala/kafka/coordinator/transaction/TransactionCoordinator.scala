@@ -521,15 +521,7 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
             if (txnMetadata.producerId != producerId) //生产者id必须一致
               Left(Errors.INVALID_PRODUCER_ID_MAPPING)
             // Strict equality is enforced on the client side requests, as they shouldn't bump the producer epoch.
-            else if ((isFromClient && producerEpoch != txnMetadata.producerEpoch) || producerEpoch < txnMetadata.producerEpoch) //当请求来自于客户端时，生产者epoch必须一致 producerEpoch不能小于原数据producerEpoch
-              Left(Errors.PRODUCER_FENCED)
-            else if (producerEpoch < txnMetadata.lastProducerEpoch) //生产者producerEpoch不能小于原数据最后一条producerEpoch
-              Left(Errors.PRODUCER_FENCED)
-            else if (producerEpoch > txnMetadata.lastProducerEpoch)
-              txnMetadata.lastProducerEpoch = producerEpoch
-            else if (txnMetadata.state == Dead)
-              Left(Errors.TRANSACTIONAL_ID_NOT_FOUND)
-            else if (txnMetadata.state == PrepareEpochFence)
+            else if ((isFromClient && producerEpoch != txnMetadata.producerEpoch) || producerEpoch < txnMetadata.producerEpoch)
               Left(Errors.PRODUCER_FENCED)
             else if (txnMetadata.pendingTransitionInProgress && txnMetadata.pendingState.get != PrepareEpochFence)
               Left(Errors.CONCURRENT_TRANSACTIONS)

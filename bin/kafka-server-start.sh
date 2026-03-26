@@ -41,4 +41,6 @@ case $COMMAND in
     ;;
 esac
 
+echo '$EXTRA_ARGS' "$EXTRA_ARGS"
+echo '$' "$@"
 exec $base_dir/kafka-run-class.sh $EXTRA_ARGS kafka.Kafka "$@"

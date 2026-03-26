@@ -46,7 +46,7 @@ case class ReplicaAssignment private (replicas: Seq[Int],
   lazy val originReplicas: Seq[Int] = replicas.diff(addingReplicas)
   lazy val targetReplicas: Seq[Int] = replicas.diff(removingReplicas)
 
-  def isBeingReassigned: Boolean = {
+  def isBeingReassigned: Boolean = {// Reassigned:重新分配
     addingReplicas.nonEmpty || removingReplicas.nonEmpty
   }
 
@@ -508,18 +508,19 @@ class ControllerContext extends ControllerChannelContext {
                                                     oldLeadershipInfo: Option[LeaderIsrAndControllerEpoch],
                                                     newReplicaAssignment: Option[ReplicaAssignment],
                                                     newLeadershipInfo: Option[LeaderIsrAndControllerEpoch]): Unit = {
-    if (!isTopicQueuedUpForDeletion(partition.topic)) {
+    if (!isTopicQueuedUpForDeletion(partition.topic)) {// 只有主题不在删除队列中，才更新不平衡计数
+
       oldReplicaAssignment.foreach { replicaAssignment =>
         oldLeadershipInfo.foreach { leadershipInfo =>
           if (!hasPreferredLeader(replicaAssignment, leadershipInfo))
-            preferredReplicaImbalanceCount -= 1
+            preferredReplicaImbalanceCount -= 1  // 之前不平衡，现在要减掉
         }
       }
 
       newReplicaAssignment.foreach { replicaAssignment =>
         newLeadershipInfo.foreach { leadershipInfo =>
           if (!hasPreferredLeader(replicaAssignment, leadershipInfo))
-            preferredReplicaImbalanceCount += 1
+            preferredReplicaImbalanceCount += 1 // 现在不平衡，要加上
         }
       }
     }
@@ -534,16 +535,34 @@ class ControllerContext extends ControllerChannelContext {
     }
   }
 
+  /**
+   * // 场景 A：正常状态
+   * 副本分配：[B1, B2, B3]
+   * Leader: B2
+   * 结果：hasPreferredLeader = false (不平衡，因为 Leader 不是 B1)
+   *
+   * // 场景 B：正在重新分配
+   * 副本分配：[B1, B2, B3]  (B1 是新加入的副本)
+   * ISR: [B2, B3]  (B1 还没同步完成，不在 ISR 中)
+   * Leader: B2
+   * 结果：hasPreferredLeader = true (暂时不算不平衡，等 B1 加入 ISR 后再说)
+   *
+   */
   private def hasPreferredLeader(replicaAssignment: ReplicaAssignment,
                                  leadershipInfo: LeaderIsrAndControllerEpoch): Boolean = {
-    val preferredReplica = replicaAssignment.replicas.head
-    if (replicaAssignment.isBeingReassigned && replicaAssignment.addingReplicas.contains(preferredReplica))
-      // reassigning partitions are not counted as imbalanced until the new replica joins the ISR (completes reassignment)
+    val preferredReplica = replicaAssignment.replicas.head // Preferred:首选的 首选副本是列表第一个
+    if (replicaAssignment.isBeingReassigned //副本在重新分配状态
+        && replicaAssignment.addingReplicas.contains(preferredReplica))
+       // reassigning partitions are not counted as imbalanced until the new replica joins the ISR (completes reassignment)
+      // 如果副本正在重新分配，且首选副本是新加入的
+      // 则检查它是否在 ISR 中（只有完成重新分配才算不平衡）
       !leadershipInfo.leaderAndIsr.isr.contains(preferredReplica)
     else
+      // 正常情况下，检查 Leader 是否等于首选副本
       leadershipInfo.leaderAndIsr.leader == preferredReplica
   }
 
+  // 是否是有效的副本状态转换
   private def isValidReplicaStateTransition(replica: PartitionAndReplica, targetState: ReplicaState): Boolean =
     targetState.validPreviousStates.contains(replicaStates(replica))
 

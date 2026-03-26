@@ -161,8 +161,8 @@ object KafkaConfig {
    */
   def populateSynonyms(input: util.Map[_, _]): util.Map[Any, Any] = {
     val output = new util.HashMap[Any, Any](input)
-    val brokerId = output.get(ServerConfigs.BROKER_ID_CONFIG)
-    val nodeId = output.get(KRaftConfigs.NODE_ID_CONFIG)
+    val brokerId = output.get(ServerConfigs.BROKER_ID_CONFIG)// broker.id
+    val nodeId = output.get(KRaftConfigs.NODE_ID_CONFIG)// node.id
     if (brokerId == null && nodeId != null) {
       output.put(ServerConfigs.BROKER_ID_CONFIG, nodeId)
     } else if (brokerId != null && nodeId == null) {
@@ -328,6 +328,7 @@ class KafkaConfig private(doLog: Boolean, val props: util.Map[_, _])
   val elrEnabled: Boolean = getBoolean(KRaftConfigs.ELR_ENABLED_CONFIG)
 
   private def parseProcessRoles(): Set[ProcessRole] = {
+    // process.roles
     val roles = getList(KRaftConfigs.PROCESS_ROLES_CONFIG).asScala.map {
       case "broker" => ProcessRole.BrokerRole
       case "controller" => ProcessRole.ControllerRole
@@ -537,25 +538,25 @@ class KafkaConfig private(doLog: Boolean, val props: util.Map[_, _])
 
   // We keep the user-provided String as `MetadataVersion.fromVersionString` can choose a slightly different version (eg if `0.10.0`
   // is passed, `0.10.0-IV0` may be picked)
-  val interBrokerProtocolVersionString = getString(ReplicationConfigs.INTER_BROKER_PROTOCOL_VERSION_CONFIG)
-  val interBrokerProtocolVersion = if (processRoles.isEmpty) {
+  val interBrokerProtocolVersionString = getString(ReplicationConfigs.INTER_BROKER_PROTOCOL_VERSION_CONFIG) // inter.broker.protocol.version
+  val interBrokerProtocolVersion = if (processRoles.isEmpty) {// If we are not a KRaft controller, we can use the user-provided IBP
     MetadataVersion.fromVersionString(interBrokerProtocolVersionString)
   } else {
     if (originals.containsKey(ReplicationConfigs.INTER_BROKER_PROTOCOL_VERSION_CONFIG)) {
       // A user-supplied IBP was given
       val configuredVersion = MetadataVersion.fromVersionString(interBrokerProtocolVersionString)
-      if (!configuredVersion.isKRaftSupported) {
+      if (!configuredVersion.isKRaftSupported) {// 这里说明进入了KRaft模式，如果内部协议版本不支持的话，直接报错，提示支持的最小版本
         throw new ConfigException(s"A non-KRaft version $interBrokerProtocolVersionString given for ${ReplicationConfigs.INTER_BROKER_PROTOCOL_VERSION_CONFIG}. " +
           s"The minimum version is ${MetadataVersion.MINIMUM_KRAFT_VERSION}")
-      } else {
+      } else {// inter.broker.protocol.version 参数在KRaft模式下已经废弃，这里warn一下
         warn(s"${ReplicationConfigs.INTER_BROKER_PROTOCOL_VERSION_CONFIG} is deprecated in KRaft mode as of 3.3 and will only " +
           s"be read when first upgrading from a KRaft prior to 3.3. See kafka-storage.sh help for details on setting " +
           s"the metadata.version for a new KRaft cluster.")
       }
     }
-    // In KRaft mode, we pin this value to the minimum KRaft-supported version. This prevents inadvertent usage of
+    // In KRaft mode, we pin(固定了) this value to the minimum KRaft-supported version. This prevents inadvertent(无意的，疏忽的) usage of
     // the static IBP config in broker components running in KRaft mode
-    MetadataVersion.MINIMUM_KRAFT_VERSION
+    MetadataVersion.MINIMUM_KRAFT_VERSION // 这里返回的是KRaft支持的最小版本 IBP_3_0_IV1
   }
 
   /** ********* Controlled shutdown configuration ***********/
@@ -776,6 +777,7 @@ class KafkaConfig private(doLog: Boolean, val props: util.Map[_, _])
   }
 
   def effectiveAdvertisedBrokerListeners: Seq[EndPoint] = {
+    // advertised.listeners
     val advertisedListenersProp = getString(SocketServerConfigs.ADVERTISED_LISTENERS_CONFIG)
     val advertisedListeners = if (advertisedListenersProp != null) {
       CoreUtils.listenerListToEndPoints(advertisedListenersProp, effectiveListenerSecurityProtocolMap, requireDistinctPorts=false)
@@ -836,6 +838,7 @@ class KafkaConfig private(doLog: Boolean, val props: util.Map[_, _])
   }
 
   def effectiveListenerSecurityProtocolMap: Map[ListenerName, SecurityProtocol] = {
+    // listener.security.protocol.map
     val mapValue = getMap(SocketServerConfigs.LISTENER_SECURITY_PROTOCOL_MAP_CONFIG, getString(SocketServerConfigs.LISTENER_SECURITY_PROTOCOL_MAP_CONFIG))
       .map { case (listenerName, protocolName) =>
         ListenerName.normalised(listenerName) -> getSecurityProtocol(protocolName, SocketServerConfigs.LISTENER_SECURITY_PROTOCOL_MAP_CONFIG)

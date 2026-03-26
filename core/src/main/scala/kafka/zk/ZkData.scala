@@ -581,7 +581,9 @@ object ConsumerOffset {
 }
 
 object ZkVersion {
+  // 匹配任何版本（用于条件设置
   val MatchAnyVersion: Int = -1 // if used in a conditional set, matches any version (the value should match ZooKeeper codebase)
+  // 当节点不存在时返回的版本号
   val UnknownVersion: Int = -2  // Version returned from get if node does not exist (internal constant for Kafka codebase, unused value in ZK)
 }
 

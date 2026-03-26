@@ -32,6 +32,7 @@ import java.nio.channels.ScatteringByteChannel;
 public class NetworkReceive implements Receive {
 
     public static final String UNKNOWN_SOURCE = "";
+    //UNLIMITED:无限制的 无限的
     public static final int UNLIMITED = -1;
     private static final Logger log = LoggerFactory.getLogger(NetworkReceive.class);
     private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);

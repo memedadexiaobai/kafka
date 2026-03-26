@@ -524,6 +524,11 @@ public enum MetadataVersion {
     private static final Map<String, MetadataVersion> IBP_VERSIONS;
 
     static {
+        // 初始化所有内部版本
+        // 例如：
+        // "3.0-IV0" → IBP_3_0_IV0
+        // "3.0-IV1" → IBP_3_0_IV1
+        // "3.0"     → IBP_3_0_IV1  (最后一个生产版本覆盖)
         MetadataVersion[] enumValues = MetadataVersion.values();
         VERSIONS = Arrays.copyOf(enumValues, enumValues.length);
 
@@ -531,10 +536,14 @@ public enum MetadataVersion {
         Map<String, MetadataVersion> maxInterVersion = new HashMap<>();
         for (MetadataVersion metadataVersion : VERSIONS) {
             if (metadataVersion.isProduction()) {
+                // 记录每个 release 的最新内部版本
                 maxInterVersion.put(metadataVersion.release, metadataVersion);
             }
+            // 放入完整的 ibpVersion
             IBP_VERSIONS.put(metadataVersion.ibpVersion, metadataVersion);
         }
+        // 将每个 release 映射到最新的内部版本
+        // 例如："3.0" → IBP_3_0_IV1
         IBP_VERSIONS.putAll(maxInterVersion);
     }
 
@@ -568,16 +577,72 @@ public enum MetadataVersion {
      * "0.10.0", "0.10.0-IV1"). `IllegalArgumentException` is thrown if `versionString` cannot be mapped to an `MetadataVersion`.
      * Note that 'misconfigured' values such as "1.0.1" will be parsed to `IBP_1_0_IV0` as we ignore anything after the first
      * two digits for versions that don't start with "0."
+     *
+     * 示例 1：0.x 版本（需要 3 段）
+     * // 输入："0.8.0"
+     * String[] versionSegments = ["0", "8", "0"]  // split 后
+     * int numSegments = 3                         // 因为以 "0." 开头
+     * key = "0.8.0"                               // 3 >= 3，使用原字符串
+     * IBP_VERSIONS.get("0.8.0") → IBP_0_8_0       // 查找 Map
+     *
+     * // 输入："0.10.0-IV1"
+     * String[] versionSegments = ["0", "10", "0-IV1"]
+     * int numSegments = 3
+     * key = "0.10.0-IV1"
+     * IBP_VERSIONS.get("0.10.0-IV1") → IBP_0_10_0_IV1
+     *
+     * 示例 2：非 0.x 版本（只需 2 段）
+     * // 输入："3.0"
+     * String[] versionSegments = ["3", "0"]
+     * int numSegments = 2                         // 不以 "0." 开头
+     * key = "3.0"                                 // 2 >= 2，使用原字符串
+     * IBP_VERSIONS.get("3.0") → IBP_3_0_IV1       // 注意：映射到最新内部版本
+     *
+     * // 输入："3.0.1"（错误配置的版本）
+     * String[] versionSegments = ["3", "0", "1"]
+     * int numSegments = 2                         // 不以 "0." 开头
+     * key = "3.0"                                 // 2 < 3，截取前 2 段
+     * IBP_VERSIONS.get("3.0") → IBP_3_0_IV1       // 忽略 ".1"
+     *
+     * // 输入："2.5.0.1"
+     * String[] versionSegments = ["2", "5", "0", "1"]
+     * int numSegments = 2
+     * key = "2.5"                                 // 截取前 2 段
+     * IBP_VERSIONS.get("2.5") → IBP_2_5_IV0
+     *
+     * 关键点总结
+     *  版本号分段规则：
+     *      0.x 版本：保留 3 段（如 0.8.0）
+     *      其他版本：保留 2 段（如 3.0）
+     *  容错性处理：
+     *      像 "1.0.1" 这样的"错误配置"会被解析为 "1.0"
+     *      自动忽略多余的段数
+     *  内部版本映射：
+     *     简短版本（如 "3.0"）会映射到该系列的最新生产版本
+     *     完整版本（如 "3.0-IV1"）精确匹配特定内部版本
+     *  Optional 的使用：
+     *    ofNullable() 处理 Map 可能返回 null 的情况
+     *    orElseThrow() 在版本不存在时抛出有意义的异常
      */
     public static MetadataVersion fromVersionString(String versionString) {
+        // 步骤 1: 按 "." 分割版本字符串
         String[] versionSegments = versionString.split(Pattern.quote("."));
+        // 步骤 2: 决定保留几个段
+        // - 如果以 "0." 开头，保留 3 段（如 0.8.0）
+        // - 否则保留 2 段（如 3.0、2.5）
         int numSegments = (versionString.startsWith("0.")) ? 3 : 2;
+        // 步骤 3: 构建查询 key
         String key;
         if (numSegments >= versionSegments.length) {
+            // 分割后的段数 <= 需要的段数，直接使用原字符串
             key = versionString;
         } else {
+            // 分割后的段数 > 需要的段数，截取前 numSegments 段
+            // 例如："1.0.1" -> "1.0"
             key = String.join(".", Arrays.copyOfRange(versionSegments, 0, numSegments));
         }
+        // 步骤 4: 从 IBP_VERSIONS Map 中查找并返回
+        // 如果找不到，抛出 IllegalArgumentException
         return Optional.ofNullable(IBP_VERSIONS.get(key)).orElseThrow(() ->
             new IllegalArgumentException("Version " + versionString + " is not a valid version")
         );

@@ -235,12 +235,17 @@ public class MetadataSnapshot {
         Map<Integer, Node> nodes = new HashMap<>();
         int nodeId = -1;
         for (InetSocketAddress address : addresses) {
+            // Node：单个节点信息的封装
             nodes.put(nodeId, new Node(nodeId, address.getHostString(), address.getPort()));
             nodeId--;
         }
-        return new MetadataSnapshot(null, nodes, Collections.emptyList(),
-                Collections.emptySet(), Collections.emptySet(), Collections.emptySet(),
-                null, Collections.emptyMap(), Cluster.bootstrap(addresses));
+        return new MetadataSnapshot(null, nodes,
+                Collections.emptyList(),
+                Collections.emptySet(),
+                Collections.emptySet(),
+                Collections.emptySet(),
+                null, Collections.emptyMap(),
+                Cluster.bootstrap(addresses));
     }
 
     static MetadataSnapshot empty() {

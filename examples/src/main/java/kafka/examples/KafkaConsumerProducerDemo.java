@@ -44,6 +44,8 @@ public class KafkaConsumerProducerDemo {
                 return;
             }
 
+            args = new String[]{"1000","sync"};
+
             int numRecords = Integer.parseInt(args[0]);
             boolean isAsync = args.length == 1 || !args[1].trim().equalsIgnoreCase("sync");
 

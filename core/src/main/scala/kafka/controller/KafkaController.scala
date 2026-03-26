@@ -298,6 +298,7 @@ class KafkaController(val config: KafkaConfig,
    * This ensures another controller election will be triggered and there will always be an actively serving controller
    */
   private def onControllerFailover(): Unit = {
+    // /feature节点处理
     maybeSetupFeatureVersioning()
 
     info("Registering handlers")
@@ -311,13 +312,14 @@ class KafkaController(val config: KafkaConfig,
     nodeChangeHandlers.foreach(zkClient.registerZNodeChangeHandlerAndCheckExistence)
 
     info("Deleting log dir event notifications")
-    // /log_dir_event_notification
+    // 删除 /log_dir_event_notification节点下的所有子节点：/log_dir_event_notification/log_dir_event_序列号
     zkClient.deleteLogDirEventNotifications(controllerContext.epochZkVersion)
     info("Deleting isr change notifications")
-    // /isr_change_notification
+    // 删除 /isr_change_notification节点下的所有子节点：/isr_change_notification/isr_change_序列号
     zkClient.deleteIsrChangeNotifications(controllerContext.epochZkVersion)
+
     info("Initializing controller context")
-    initializeControllerContext()
+    initializeControllerContext() //初始化 Controller 上下文
     info("Fetching topic deletions in progress")
     val (topicsToBeDeleted, topicsIneligibleForDeletion) = fetchTopicDeletionsInProgress()
     info("Initializing topic deletion manager")
@@ -370,13 +372,13 @@ class KafkaController(val config: KafkaConfig,
   /**
    * This method enables the feature versioning system (KIP-584).
    *
-   * Development in Kafka (from a high level) is organized into features. Each feature is tracked by
+   * Development in Kafka (from a high level) is organized into(被组织成 有组织的) features. Each feature is tracked by
    * a name and a range of version numbers or a version number. A feature can be of two types:
    *
    * 1. Supported feature:
    * A supported feature is represented by a name (string) and a range of versions (defined by a SupportedVersionRange).
-   * It refers to a feature that a particular broker advertises support for(advertises support for ：指“声称支持、宣传支持”，强调公开声明对某项功能的支持。).
-   * Each broker advertises the version ranges of its own supported features in its own BrokerIdZNode.
+   * It refers to a feature that a particular(特定的) broker advertises support for(advertises support for ：指“声称支持、宣传支持”，强调公开声明对某项功能的支持。).
+   * Each broker advertises(宣传，强调) the version ranges of its own supported features in its own BrokerIdZNode.
    * The contents of the advertisement are specific to the particular broker and
    * do not represent any guarantee(保证) of a cluster-wide availability of the feature for any particular
    * range of versions.
@@ -386,7 +388,7 @@ class KafkaController(val config: KafkaConfig,
    * Whenever(每当) the feature versioning system (KIP-584) is enabled,
    * the finalized features are stored in the cluster-wide common FeatureZNode.
    * In comparison to(与...相比) a supported feature, the key difference is that a finalized feature exists in ZK only
-   * when it is guaranteed to be supported by any random broker in the cluster for a specified range of version levels.
+   * when it is guaranteed to be supported by any random broker in the cluster for a specified range of version levels.  它保证在指定的版本级别范围内，集群中的任何随机代理都会支持它。
    * Also, the controller is the only entity modifying the information about finalized features.
    *
    *
@@ -468,6 +470,7 @@ class KafkaController(val config: KafkaConfig,
       val newFeatureZNode = FeatureZNode(config.interBrokerProtocolVersion, FeatureZNodeStatus.Enabled, newFeatures)
       if (!newFeatureZNode.equals(existingFeatureZNode)) {
         val newVersion = updateFeatureZNode(newFeatureZNode)
+        // 这个还等到本地的元数据缓存也更新了
         featureCache.waitUntilFeatureEpochOrThrow(newVersion, config.zkConnectionTimeoutMs)
       }
     }
@@ -491,7 +494,7 @@ class KafkaController(val config: KafkaConfig,
   private def disableFeatureVersioning(): Unit = {
     val newNode = FeatureZNode(config.interBrokerProtocolVersion, FeatureZNodeStatus.Disabled, Map.empty[String, Short])
     val (mayBeFeatureZNodeBytes, version) = zkClient.getDataAndVersion(FeatureZNode.path)
-    if (version == ZkVersion.UnknownVersion) {
+    if (version == ZkVersion.UnknownVersion) {// feature 节点不存在（没有值）
       createFeatureZNode(newNode)
     } else {
       val existingFeatureZNode = FeatureZNode.decode(mayBeFeatureZNodeBytes.get)
@@ -507,6 +510,7 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def maybeSetupFeatureVersioning(): Unit = {
+     //  IBP_2_7_IV0版本及其后续版本
     if (config.isFeatureVersioningSupported) {
       enableFeatureVersioning()
     } else {
@@ -741,11 +745,11 @@ class KafkaController(val config: KafkaConfig,
    * AR = The replicas we are adding as part of this reassignment
    * RR = The replicas we are removing as part of this reassignment
    *
-   * A reassignment may have up to three phases, each with its own steps:
+   * A reassignment may have up(有) to three phases, each with its own steps:
 
    * Phase U (Assignment update): Regardless of the trigger, the first step is in the reassignment process
-   * is to update the existing assignment state. We always update the state in Zookeeper before
-   * we update memory so that it can be resumed upon controller fail-over.
+   * is to update the existing assignment state. We always update the state in Zookeeper before 先更新Zookeeper
+   * we update memory so that it can be resumed(重新开始) upon controller fail-over.
    *
    *   U1. Update ZK with RS = ORS + TRS, AR = TRS - ORS, RR = ORS - TRS.
    *   U2. Update memory with RS = ORS + TRS, AR = TRS - ORS and RR = ORS - TRS
@@ -757,8 +761,8 @@ class KafkaController(val config: KafkaConfig,
    *
    * Phase A (when TRS != ISR): The reassignment is not yet complete
    *
-   *   A1. Bump the leader epoch for the partition and send LeaderAndIsr updates to RS.
-   *   A2. Start new replicas AR by moving replicas in AR to NewReplica state.
+   *   A1. Bump(碰撞 提升) the leader epoch for the partition and send LeaderAndIsr updates to RS.
+   *   A2. Start new replicas AR by moving replicas in AR to NewReplica state. 通过将AR中的副本移动到NewReplica状态来启动新的AR副本
    *
    * Phase B (when TRS = ISR): The reassignment is complete
    *
@@ -794,6 +798,91 @@ class KafkaController(val config: KafkaConfig,
    * Note that we have to update RS in ZK with TRS last since it's the only place where we store ORS persistently.
    * This way, if the controller crashes before that step, we can still recover.
    */
+  /**
+   * 这个回调方法在以下情况被调用：
+   * 1. 通过 AlterPartitionReassignments API 触发
+   * 2. 通过重新分配分区监听器触发（当 /admin/reassign/partitions znode 被创建时）
+   * 3. 当正在进行的重新分配完成时 - 这通过分区的 ISR znode 变化来检测
+   * 4. 每当属于正在进行的重新分配的新 Broker 上线时
+   * 5. 在 Controller 启动或故障转移时
+   *
+   * 分区的副本重新分配会经历几个步骤（代码中详述）。
+   * RS = 当前已分配的副本集 (Replica Set)
+   * ORS = 原始副本集 (Original Replica Set)
+   * TRS = 目标副本集 (Target/Reassigned Replica Set)
+   * AR = 作为此次重新分配一部分要添加的副本 (Adding Replicas)
+   * RR = 作为此次重新分配一部分要移除的副本 (Removing Replicas)
+   *
+   * 重新分配最多可能有三个阶段，每个阶段都有自己的步骤：
+   *
+   * --- 阶段 U（分配更新）---
+   * 无论触发条件是什么，重新分配过程的第一步始终是更新现有的分配状态。
+   * 我们会先在 Zookeeper 中更新状态，然后再更新内存，以便在 Controller 故障转移时可以恢复。
+   *
+   * U1. 在 ZK 中更新：RS = ORS + TRS, AR = TRS - ORS, RR = ORS - TRS
+   * U2. 在内存中更新：RS = ORS + TRS, AR = TRS - ORS, RR = ORS - TRS
+   * U3. 如果要取消或替换现有的重新分配，向 AR 中所有不属于新 TRS 的成员发送 StopReplica 请求
+   *
+   * --- 阶段 A（当 TRS != ISR 时）---
+   * 重新分配尚未完成
+   *
+   * A1. 提升分区的 Leader 纪元（epoch），并向 RS 发送 LeaderAndIsr 更新请求
+   * A2. 通过将 AR 中的副本移动到 NewReplica 状态来启动新的副本
+   *
+   * --- 阶段 B（当 TRS = ISR 时）---
+   * 重新分配已完成
+   *
+   * B1. 将 AR 中的所有副本移动到 OnlineReplica 状态
+   * B2. 在内存中设置：RS = TRS, AR = [], RR = []
+   * B3. 发送 LeaderAndIsr 请求，其中 RS = TRS。这将防止 Leader 将任何 TRS - ORS 中的副本重新添加回 ISR。
+   * 如果当前 Leader 不在 TRS 中或不可用，我们将 Leader 转移到 TRS 中的新副本。
+   * 由于分区状态机的工作方式（它从 ZK 读取副本），我们可能会向多于 TRS 的副本发送 LeaderAndIsr 请求
+   * B4. 将 RR 中的所有副本移动到 OfflineReplica 状态。作为 OfflineReplica 状态变更的一部分，
+   * 我们会在 ZooKeeper 中收缩 ISR 以移除 RR，并仅向 Leader 发送 LeaderAndIsr 请求以通知它 ISR 已收缩。
+   * 之后，我们向 RR 中的副本发送 StopReplica（delete = false）
+   * B5. 将 RR 中的所有副本移动到 NonExistentReplica 状态。这将向 RR 中的副本发送 StopReplica（delete = true）
+   * 以物理删除磁盘上的副本
+   * B6. 在 ZK 中更新：RS = TRS, AR = [], RR = []
+   * B7. 移除 ISR 重新分配监听器，并可能更新 ZK 中的 /admin/reassign_partitions 路径以从中移除此分区（如果存在）
+   * B8. 在选举 Leader 后，副本和 ISR 信息会发生变化。因此需要向每个 Broker 重新发送更新元数据请求
+   *
+   * 通常，我们有两个目标要实现：
+   * 1. LeaderAndIsr 请求的副本集中存在的每个副本都能收到该请求
+   * 2. 从分区分配中移除的副本会收到 StopReplica 请求
+   *
+   * 例如，如果 ORS = {1,2,3} 且 TRS = {4,5,6}，ZK 中 topic 路径和 leader/isr 路径的值可能会经历以下转换：
+   * RS                AR          RR          Leader     ISR
+   * {1,2,3}           {}          {}          1          {1,2,3}           (初始状态)
+   * {4,5,6,1,2,3}     {4,5,6}     {1,2,3}     1          {1,2,3}           (步骤 A2)
+   * {4,5,6,1,2,3}     {4,5,6}     {1,2,3}     1          {1,2,3,4,5,6}     (阶段 B)
+   * {4,5,6,1,2,3}     {4,5,6}     {1,2,3}     4          {1,2,3,4,5,6}     (步骤 B3)
+   * {4,5,6,1,2,3}     {4,5,6}     {1,2,3}     4          {4,5,6}           (步骤 B4)
+   * {4,5,6}           {}          {}          4          {4,5,6}           (步骤 B6)
+   *
+   * 注意：我们必须最后才在 ZK 中将 RS 更新为 TRS，因为这是唯一持久存储 ORS 的地方。
+   * 这样，如果 Controller 在这一步之前崩溃，我们仍然可以恢复。
+   *
+   * 1️⃣ 为什么需要三个阶段？
+   *  阶段 U：确保状态持久化到 ZK，防止故障丢失
+   *  阶段 A：逐步让新副本加入，确保数据同步
+   *  阶段 B：安全地清理旧副本，完成切换
+   * 2️⃣ 为什么先更新 ZK 再更新内存？
+   *  // 原因：故障恢复（Fail-over）
+   *  // 如果 Controller 挂了，新的 Controller 可以从 ZK 恢复状态
+   *  updateZK()    // ✅ 持久化
+   *  updateMemory() // 内存状态
+   * 3️⃣ 示例状态转换的含义
+   * 初始：副本在 Broker 1,2,3
+   * 目标：迁移到 Broker 4,5,6
+   *
+   * 过程：
+   * 1. 先同时保留 6 个副本（1,2,3,4,5,6）- 确保不丢数据
+   * 2. 等新副本 4,5,6 都同步完成（ISR = {1,2,3,4,5,6}）
+   * 3. 切换 Leader 到新副本（Leader: 1 → 4）
+   * 4. 收缩 ISR，只保留 4,5,6
+   * 5. 最后删除旧副本 1,2,3
+   *这就是 Kafka 分区重新分配的完整流程！核心思想是：先加后减，确保安全 🎯
+   */
   private def onPartitionReassignment(topicPartition: TopicPartition, reassignment: ReplicaAssignment): Unit = {
     // While a reassignment is in progress, deletion is not allowed
     topicDeletionManager.markTopicIneligibleForDeletion(Set(topicPartition.topic), reason = "topic reassignment in progress")
@@ -803,7 +892,7 @@ class KafkaController(val config: KafkaConfig,
     val addingReplicas = reassignment.addingReplicas
     val removingReplicas = reassignment.removingReplicas
 
-    if (!isReassignmentComplete(topicPartition, reassignment)) {
+    if (!isReassignmentComplete(topicPartition, reassignment)) {//分区重分配没完成
       // A1. Send LeaderAndIsr request to every replica in ORS + TRS (with the new RS, AR and RR).
       updateLeaderEpochAndSendRequest(topicPartition, reassignment)
       // A2. replicas in AR -> NewReplica
@@ -852,15 +941,15 @@ class KafkaController(val config: KafkaConfig,
     if (currentAssignment != reassignment) {
       debug(s"Updating assignment of partition $topicPartition from $currentAssignment to $reassignment")
 
-      // U1. Update assignment state in zookeeper
+      // U1. Update assignment state in zookeeper 先更新Zookeeper
       updateReplicaAssignmentForPartition(topicPartition, reassignment)
-      // U2. Update assignment state in memory
+      // U2. Update assignment state in memory 在更新本地内存
       controllerContext.updatePartitionFullReplicaAssignment(topicPartition, reassignment)
 
       // If there is a reassignment already in progress, then some of the currently adding replicas
       // may be eligible for immediate removal, in which case we need to stop the replicas.
       val unneededReplicas = currentAssignment.replicas.diff(reassignment.replicas)
-      if (unneededReplicas.nonEmpty)
+      if (unneededReplicas.nonEmpty)//利用副本状态机移除不影响的副本
         stopRemovedReplicasOfReassignedPartition(topicPartition, unneededReplicas)
     }
 
@@ -967,7 +1056,8 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def initializeControllerContext(): Unit = {
-    // update controller cache with delete topic information /brokers/ids/$id
+    // update controller cache with delete topic information
+    // 1.查询/brokers/ids下的所有子节点 2./brokers/ids/$id查询每个子节点的数据
     val curBrokerAndEpochs = zkClient.getAllBrokerAndEpochsInCluster
     val (compatibleBrokerAndEpochs, incompatibleBrokerAndEpochs) = partitionOnFeatureCompatibility(curBrokerAndEpochs)
     if (incompatibleBrokerAndEpochs.nonEmpty) {
@@ -977,11 +1067,12 @@ class KafkaController(val config: KafkaConfig,
     // 兼容所有功能特性才能是 liveBroker
     controllerContext.setLiveBrokers(compatibleBrokerAndEpochs)
     info(s"Initialized broker epochs cache: ${controllerContext.liveBrokerIdAndEpochs}")
-    // /brokers/topics
+    // /brokers/topics下的所有节点
     controllerContext.setAllTopics(zkClient.getAllTopicsInCluster(true))
     registerPartitionModificationsHandlers(controllerContext.allTopics.toSeq)
     // /brokers/topics/$topic
     val replicaAssignmentAndTopicIds = zkClient.getReplicaAssignmentAndTopicIdForTopics(controllerContext.allTopics.toSet)
+    // 在kraft模式或者版本大于IBP_2_8_IV0保证topic都有topicId
     processTopicIds(replicaAssignmentAndTopicIds)
 
     replicaAssignmentAndTopicIds.foreach { case TopicIdReplicaAssignment(_, _, assignments) =>
@@ -996,6 +1087,7 @@ class KafkaController(val config: KafkaConfig,
     // register broker modifications handlers
     registerBrokerModificationsHandler(controllerContext.liveOrShuttingDownBrokerIds)
     // update the leader and isr cache for all existing partitions from Zookeeper
+    // /brokers/topics/$topic/partitions/$partition/state 拿到最新的Leader和Isr信息
     updateLeaderAndIsrCache()
     // start the channel manager
     controllerChannelManager.startup(controllerContext.liveOrShuttingDownBrokers)
@@ -1062,7 +1154,7 @@ class KafkaController(val config: KafkaConfig,
     val topicsIneligibleForDeletion = topicsWithOfflineReplicas | topicsForWhichPartitionReassignmentIsInProgress
     info(s"List of topics to be deleted: ${topicsToBeDeleted.mkString(",")}")
     info(s"List of topics ineligible for deletion: ${topicsIneligibleForDeletion.mkString(",")}")
-    (topicsToBeDeleted, topicsIneligibleForDeletion)
+    (topicsToBeDeleted, topicsIneligibleForDeletion)//Ineligible:不合格的 无资格的
   }
 
   private def updateLeaderAndIsrCache(partitions: Seq[TopicPartition] = controllerContext.allPartitions.toSeq): Unit = {
@@ -1079,7 +1171,51 @@ class KafkaController(val config: KafkaConfig,
       zkClient.getTopicPartitionStates(Seq(partition)).get(partition).exists { leaderIsrAndControllerEpoch =>
         val isr = leaderIsrAndControllerEpoch.leaderAndIsr.isr.toSet
         val targetReplicas = assignment.targetReplicas.toSet
-        targetReplicas.subsetOf(isr)
+        /**
+         * targetReplicas = 重分配后期望的最终副本集合
+         * 在分区重分配的场景中，ReplicaAssignment 包含三种副本：
+         *   originReplicas - 原始副本（重分配前的副本）
+         *   addingReplicas - 新增的副本
+         *   targetReplicas - 目标副本（重分配完成后应该存在的最终副本集合）
+         * 假设你有一个分区 topic-0，当前有 3 个副本在 Broker [1, 2, 3] 上：
+         * 场景 1：增加副本（扩展）
+         *   // 原始状态
+         *   originReplicas = [1, 2, 3]
+         *
+         *   // 要添加 2 个新副本到 Broker 4 和 5
+         *   addingReplicas = [4, 5]
+         *
+         *   // 重分配完成后的目标状态
+         *  targetReplicas = [1, 2, 3, 4, 5]
+         * 场景 2：减少副本（收缩）
+         *  // 原始状态
+         *  originReplicas = [1, 2, 3, 4, 5]
+         *
+         *  // 要移除 Broker 4 和 5 上的副本
+         *  removingReplicas = [4, 5]
+         *
+         *  // 重分配完成后的目标状态
+         *  targetReplicas = [1, 2, 3]
+         * 场景 3：迁移副本
+         *  // 原始状态
+         *  originReplicas = [1, 2, 3]
+         *
+         *  // 要把副本从 Broker 3 迁移到 Broker 4
+         *  addingReplicas = [4]
+         *  removingReplicas = [3]
+         *
+         *  // 重分配完成后的目标状态
+         *  targetReplicas = [1, 2, 4]
+         * 这里检查所有目标副本是否都已经同步完成
+         *  isr (In-Sync Replicas)：当前实际处于同步状态的副本集合
+         *  targetReplicas.subsetOf(isr)：判断目标副本是否都是 ISR 的子集
+         * 只有当所有目标副本都完成了数据同步，进入 ISR 列表，才能认为重分配完成了。
+         *
+         * 这是 Kafka 的安全性保证：
+         *  新增的副本必须完全追上数据（进入 ISR），才能算重分配成功
+         *  避免在数据还没同步完成时就删除旧副本，导致数据丢失
+         */
+        targetReplicas.subsetOf(isr) // 检查目标副本是否都在 ISR 中
       }
     }
   }
@@ -1089,7 +1225,7 @@ class KafkaController(val config: KafkaConfig,
     val reassignedReplicas = newAssignment.replicas
     val currentLeader = controllerContext.partitionLeadershipInfo(topicPartition).get.leaderAndIsr.leader
 
-    if (!reassignedReplicas.contains(currentLeader)) {
+    if (!reassignedReplicas.contains(currentLeader)) {//新副本集不包含当前leader
       info(s"Leader $currentLeader for partition $topicPartition being reassigned, " +
         s"is not in the new list of replicas ${reassignedReplicas.mkString(",")}. Re-electing leader")
       // move the leader to one of the alive and caught up new replicas
@@ -1106,6 +1242,14 @@ class KafkaController(val config: KafkaConfig,
     }
   }
 
+  /**
+   * 关键设计点
+   *  状态机驱动：使用 replicaStateMachine 通过状态变迁来管理副本生命周期
+   *   OfflineReplica → ReplicaDeletionStarted → ReplicaDeletionSuccessful → NonExistentReplica
+   *  批量处理：所有操作都是批量执行的（handleStateChanges 接受序列），提高效率
+   *  潜在的改进空间：TODO 提示当前缺少错误处理和重试机制，这在分布式系统中可能导致数据不一致
+   *
+   */
   private def stopRemovedReplicasOfReassignedPartition(topicPartition: TopicPartition,
                                                        removedReplicas: Seq[Int]): Unit = {
     // first move the replica to offline state (the controller removes it from the ISR)
@@ -1119,6 +1263,12 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def updateReplicaAssignmentForPartition(topicPartition: TopicPartition, assignment: ReplicaAssignment): Unit = {
+    /**
+     * ++= 在 Scala 中是集合的合并操作符，它的作用是：
+     *  创建一个新的可变 Map：mutable.Map() 创建一个空的可变 Map
+     *  使用 ++= 合并元素：将右侧集合的所有元素添加到左侧的 Map 中
+     *  自动去重：如果右侧有重复的键，后面的值会覆盖前面的值
+     */
     val topicAssignment = mutable.Map() ++=
       controllerContext.partitionFullReplicaAssignmentForTopic(topicPartition.topic) +=
       (topicPartition -> assignment)
@@ -1156,6 +1306,56 @@ class KafkaController(val config: KafkaConfig,
           // logDir. This is exactly the behavior we want for the original replicas, but not
           // for the replicas we add in this reassignment. For new replicas, want to be able
           // to assign to one of the good logDirs.
+          /**
+           * 为什么要发 2 个请求？
+           *  关键在于 isNew 标志位的不同，这涉及到 Kafka 处理日志目录（logDir）故障时的行为差异。
+           *
+           *  假设分区 topic-0 原本有 3 个副本在 Broker [1, 2, 3]，现在要扩展到 Broker [1, 2, 3, 4, 5]：
+           *  originReplicas = [1, 2, 3]    // 原始副本
+           *  addingReplicas = [4, 5]       // 新增副本
+           *  targetReplicas = [1, 2, 3, 4, 5]  // 最终目标
+           *  请求 1：发给原始副本（Broker 1, 2, 3）
+           *   brokerRequestBatch.addLeaderAndIsrRequestForBrokers(
+           *    assignment.originReplicas,  // [1, 2, 3]
+           *    topicPartition,
+           *    updatedLeaderIsrAndControllerEpoch,
+           *    assignment,
+           *    isNew = false  // ⚠️ 关键：不是新副本
+           *   )
+           *  请求 2：发给新增副本（Broker 4, 5）
+           *   brokerRequestBatch.addLeaderAndIsrRequestForBrokers(
+           *    assignment.addingReplicas,  // [4, 5]
+           *    topicPartition,
+           *    updatedLeaderIsrAndControllerEpoch,
+           *    assignment,
+           *    isNew = true  // ⚠️ 关键：是新副本
+           *   )
+           * isNew 标志的作用
+           *  isNew = false（原始副本）：
+           *    如果某个原始副本所在的 logDir 当前是离线状态
+           *    Kafka 会保守处理：不会立即在这个 Broker 的其他健康 logDir 创建新副本
+           *   原因：原始副本可能只是临时离线，数据还在那里，应该等待恢复
+           * isNew = true（新增副本）：
+           *   如果某个新增副本所在的 logDir 当前是离线状态
+           *   Kafka 会灵活处理：可以在这个 Broker 的其他健康 logDir 创建副本
+           *   原因：这些本来就是新加的副本，没有历史包袱，可以分配到任何健康的日志目录
+           *
+           * 假设 Broker 4 有两个日志目录：/data1 和 /data2
+           *  场景 A：原始副本（Broker 2）的 /data1 故障
+           *   // Broker 2 的 /data1 离线，但 /data2 正常
+           *   // 因为 isNew = false，Kafka 不会自动把副本移到 /data2
+           *   // 而是等待 /data1 恢复（因为数据可能还在 /data1）
+           * 场景 B：新增副本（Broker 4）的 /data1 故障
+           *  // Broker 4 的 /data1 离线，但 /data2 正常
+           *  // 因为 isNew = true，Kafka 会把新副本创建在 /data2
+           *  // 这样可以快速完成重分配，不受故障影响
+           *
+           * 为什么不能合并成一个请求？
+           * 因为 同一个分区对不同 Broker 需要不同的 isNew 策略：
+           *  对原始副本要用 isNew = false（保守）
+           *  对新增副本要用 isNew = true（灵活）
+           * 而 addLeaderAndIsrRequestForBrokers 方法的 isNew 参数对一批 Brokers 是统一的，所以必须分成两个请求发送。
+           */
           brokerRequestBatch.addLeaderAndIsrRequestForBrokers(assignment.originReplicas, topicPartition,
             updatedLeaderIsrAndControllerEpoch, assignment, isNew = false)
           brokerRequestBatch.addLeaderAndIsrRequestForBrokers(assignment.addingReplicas, topicPartition,
@@ -1582,7 +1782,7 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def elect(): Unit = {
-    // 获取 /controller 下的值
+    // 获取 /controller 下的值 代表当前Controller id
     activeControllerId = zkClient.getControllerId.getOrElse(-1)
     /*
      * We can get here during the initial startup and the handleDeleted ZK callback. Because of the potential(潜在的) race condition,
@@ -1627,21 +1827,24 @@ class KafkaController(val config: KafkaConfig,
    *    the existing finalized features.
    *
    * @param brokersAndEpochs   the map to be partitioned
-   * @return                   two maps: first contains compatible brokers and second contains
-   *                           incompatible brokers as explained above
+   * @return two maps: first contains compatible brokers and second contains
+   *         incompatible brokers as explained above
+   *
+   *  第一个 map：包含与 finalized features 兼容的 brokers
+   *  第二个 map：包含与 finalized features 不兼容的
    */
   private def partitionOnFeatureCompatibility(brokersAndEpochs: Map[Broker, Long]): (Map[Broker, Long], Map[Broker, Long]) = {
     // There can not be any feature incompatibilities when the feature versioning system is disabled
     // or when the finalized feature cache is empty. Otherwise, we check if the non-empty contents
     //  of the cache are compatible with the supported features of each broker.
+    // partition 函数根据条件将集合分成两组：满足条件的在第一组，不满足的在第二组
+    // 当前节点是Controller->当前节点不支持features特性就全部不支持(feature 版本系统被禁用)
+    // 当前节点配置支持features特性 -> 如果feature cache中finalized features是空 or broker有和finalized features不兼容的特性
     brokersAndEpochs.partition {
       case (broker, _) =>
         !config.isFeatureVersioningSupported ||
-        !featureCache.getFeatureOption.exists(
-          latestFinalizedFeatures =>
-            BrokerFeatures.hasIncompatibleFeatures(broker.features,
-              latestFinalizedFeatures.finalizedFeatures().asScala.
-                map(kv => (kv._1, kv._2.toShort)).toMap))
+        !featureCache.getFeatureOption.exists(latestFinalizedFeatures => BrokerFeatures.hasIncompatibleFeatures(broker.features,
+              latestFinalizedFeatures.finalizedFeatures().asScala.map(kv => (kv._1, kv._2.toShort)).toMap))
     }
   }
 
@@ -1748,7 +1951,7 @@ class KafkaController(val config: KafkaConfig,
   private def processTopicIds(topicIdAssignments: Set[TopicIdReplicaAssignment]): Unit = {
     // Create topic IDs for topics missing them if we are using topic IDs
     // Otherwise, maintain what we have in the topicZNode
-    val updatedTopicIdAssignments = if (config.usesTopicId) {
+    val updatedTopicIdAssignments = if (config.usesTopicId) {// kraft模式或者版本大于IBP_2_8_IV0
       val (withTopicIds, withoutTopicIds) = topicIdAssignments.partition(_.topicId.isDefined)
       withTopicIds ++ zkClient.setTopicIds(withoutTopicIds, controllerContext.epochZkVersion) // epochZkVersion 默认0
     } else {
@@ -1860,6 +2063,7 @@ class KafkaController(val config: KafkaConfig,
       val reassignmentResults = mutable.Map.empty[TopicPartition, ApiError]
       val partitionsToReassign = mutable.Map.empty[TopicPartition, ReplicaAssignment]
 
+      // /admin/reassign_partitions
       zkClient.getPartitionReassignment.forKeyValue { (tp, targetReplicas) =>
         maybeBuildReassignment(tp, Some(targetReplicas)) match {
           case Some(context) => partitionsToReassign.put(tp, context)
@@ -1945,6 +2149,7 @@ class KafkaController(val config: KafkaConfig,
 
   private def maybeBuildReassignment(topicPartition: TopicPartition,
                                      targetReplicasOpt: Option[Seq[Int]]): Option[ReplicaAssignment] = {
+    // 读取本地维护的缓存
     val replicaAssignment = controllerContext.partitionFullReplicaAssignment(topicPartition)
     if (replicaAssignment.isBeingReassigned) {
       val targetReplicas = targetReplicasOpt.getOrElse(replicaAssignment.originReplicas)

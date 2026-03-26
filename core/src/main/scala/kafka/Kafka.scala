@@ -28,14 +28,18 @@ import org.apache.kafka.server.util.CommandLineUtils
 object Kafka extends Logging {
 
   def getPropsFromArgs(args: Array[String]): Properties = {
+    // 创建解析器（false = 不允许选项缩写）
     val optionParser = new OptionParser(false)
-    val overrideOpt = optionParser.accepts("override", "Optional property that should override values set in server.properties file")
-      .withRequiredArg()
-      .ofType(classOf[String])
+    // 定义 --override 选项（需要参数值）
+    val overrideOpt = optionParser
+      .accepts("override", "Optional property that should override values set in server.properties file")
+      .withRequiredArg() // 需要参数
+      .ofType(classOf[String]) // 参数类型
     // This is just to make the parameter show up in the help output, we are not actually using this due the
     // fact that this class ignores the first parameter which is interpreted as positional and mandatory
     // but would not be mandatory if --version is specified
     // This is a bit of an ugly crutch till we get a chance to rework the entire command line parsing
+    // 定义 --version 选项（无参数）
     optionParser.accepts("version", "Print version information and exit.")
 
     if (args.isEmpty || args.contains("--help")) {
@@ -50,13 +54,14 @@ object Kafka extends Logging {
     val props = Utils.loadProps(args(0))
 
     if (args.length > 1) {
+      // 解析参数
       val options = optionParser.parse(args.slice(1, args.length): _*)
 
       if (options.nonOptionArguments().size() > 0) {
         CommandLineUtils.printUsageAndExit(optionParser, "Found non argument parameters: " + options.nonOptionArguments().toArray.mkString(","))
       }
-
-      props ++= CommandLineUtils.parseKeyValueArgs(options.valuesOf(overrideOpt))
+      //配置文件中的属性 + 命令中显式配置的属性
+      props ++= CommandLineUtils.parseKeyValueArgs(options.valuesOf(overrideOpt)) // 获取选项值
     }
     props
   }
@@ -86,7 +91,9 @@ object Kafka extends Logging {
 
   def main(args: Array[String]): Unit = {
     try {
-      val serverProps = getPropsFromArgs(args)
+      val newArgs = Array("/Users/a58/github_workspace/kafka/config/kraft/server.properties")
+
+      val serverProps = getPropsFromArgs(newArgs)
       val server = buildServer(serverProps)
 
       try {

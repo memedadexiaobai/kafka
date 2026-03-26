@@ -475,7 +475,7 @@ final class ClusterConnectionStates {
         long failedConnectAttempts;
         long reconnectBackoffMs;
         long connectionSetupTimeoutMs;
-        // Connection is being throttled if current time < throttleUntilTimeMs.
+        // Connection is being throttled(节流，限制) if current time < throttleUntilTimeMs.
         long throttleUntilTimeMs;
         private List<InetAddress> addresses;
         private int addressIndex;

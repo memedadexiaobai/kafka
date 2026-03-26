@@ -205,6 +205,115 @@ class ZkPartitionStateMachine(config: KafkaConfig,
    * @return A map of failed and successful elections when targetState is OnlinePartitions. The keys are the
    *         topic partitions and the corresponding values are either the exception that was thrown or new
    *         leader & ISR.
+   *
+   *         1️⃣ NewPartition：只是"登记户口"
+   *         场景：Kafka 启动时，或者新创建了一个 Topic
+   *         动作：
+   *    1. 从ZooKeeper读取分区分配信息：/brokers/topics/{topic}/partitions/{partitionId}/replicas
+   *    2. 将信息加载到 Controller 的内存缓存中
+   *      controllerContext.putPartitionState(partition, NewPartition)
+   *    3. 不做任何网络通信
+   *      - 不选举 Leader（还不知道哪些副本在线）
+   *      - 不发送请求（没有可通知的对象）
+   *    // 初始状态：Controller 刚启动，内存是空的
+   *    val partitions = Seq(new TopicPartition("my-topic", 0))
+   *    // 转换为 NewPartition：
+   *    //   - 从 ZK 读取：replicas = [0, 1, 2]
+   *    //   - 存入缓存：controllerContext.partitionReplicaAssignment = [0, 1, 2]
+   *    //   - 结束！不发送任何请求
+   *    // 为什么？因为此时只是"知道了分区的存在"，还没有"激活"这个分区
+   *
+   * 2️⃣ OnlinePartition：真正"开业营业"
+   *         情况 A：新分区首次上线 (NewPartition → OnlinePartition)
+   *  1. 初始化 Leader 和 ISR
+   *      - 选择第一个存活副本作为 Leader
+   *      - 所有存活副本组成 ISR
+   *  2. 写入 ZooKeeper：/controller/partitions/{topic}/{partition}/state
+   *     { "leader": 0, "isr": [0,1,2], "epoch": 1 }
+   *  3. ✅ 发送 LeaderAndIsrRequest
+   *      - 给 ISR 中的所有副本：你们现在是一个团队了
+   *      - isNew = true（告诉 follower 这是新建的分区）
+   *  4. ✅ 发送 UpdateMetadataRequest
+   *      - 给所有 Broker：这是新的分区元数据
+   *  controllerBrokerRequestBatch.addLeaderAndIsrRequestForBrokers(
+   *     leaderIsrAndControllerEpoch.leaderAndIsr.isr,  // 接收请求的副本列表
+   *     partition,
+   *     leaderIsrAndControllerEpoch,
+   *     controllerContext.partitionFullReplicaAssignment(partition),
+   *     isNew = true  // ← 标识这是新建分区
+   *   )
+   *  情况 B：已存在分区重新上线 (OfflinePartition → OnlinePartition)
+   *   1. 选举新的 Leader（可能有多种策略）
+   *   2. 更新 ZooKeeper 中的 LeaderAndIsr 信息
+   *   3. ✅ 发送 LeaderAndIsrRequest
+   *      - 通知相关副本新的 Leader 和 ISR 成员
+   *      - isNew = false（这不是新建分区）
+   *
+   * 3️⃣ OfflinePartition：只是"暂停营业"
+   *         场景：检测到某个副本宕机了
+   *         动作：
+   *   1. 在 Controller 内存中标记为 Offline
+   *      controllerContext.putPartitionState(partition, OfflinePartition)
+   *   2. ❌ 不发送 LeaderAndIsrRequest
+   *      - 因为这个分区要下线了，没必要通知别人
+   *      - 其他副本通过心跳检测自己会发现同伴消失了
+   *   3. 如果需要 ISR 收缩，会在其他地方处理（不是在状态转换这里，而是在专门的 ISR 管理逻辑中）
+   *   为什么 Offline 不发请求？
+   *   想象一个场景：
+   *    - 分区有副本 [0, 1, 2]
+   *    - 副本 2 宕机了
+   *    错误做法（如果 Offline 发请求）：
+   *     Controller: "嘿，副本 2 下线了"
+   *     副本 0、1: "？？？我们已经知道了啊"
+   *     副本 2: "（已经宕机，收不到消息）"
+   *     → 毫无意义的请求
+   *    正确做法：
+   *     - Controller 在内存中标记：副本 2 是 Offline
+   *     - 后续选举 Leader 时会自动排除副本 2
+   *     - 必要时发送 StopReplicaRequest 让其他副本停止向 2 同步
+   *
+   * 场景：Topic "orders" 有 3 个分区
+   * ========== 阶段 1：Kafka 启动 ==========
+   * Controller 启动，发现已有 Topic
+   *  步骤 1：NewPartition
+   *   partitions = ["orders-0", "orders-1", "orders-2"]
+   *   doHandleStateChanges(partitions, NewPartition, None)
+   *  执行结果：
+   *   ✅ controllerContext 中有了分区信息
+   *   ❌ 没有发送任何网络请求
+   *   状态：NewPartition
+   *
+   * ========== 阶段 2：分区上线 ==========
+   * 让分区开始服务
+   * 步骤 2：OnlinePartition（首次）
+   *    doHandleStateChanges(partitions, OnlinePartition, Some(OfflinePartitionLeaderElectionStrategy(false)))
+   * 执行结果：
+   *  ✅ 选举 broker-0 为 orders-0 的 Leader
+   *  ✅ 写入 ZK：/controller/partitions/orders/0/state
+   *  ✅ 发送 LeaderAndIsrRequest 给 [broker-0, broker-1, broker-2]
+   *  ✅ 发送 UpdateMetadataRequest 给所有 Broker
+   *  状态：OnlinePartition
+   *
+   * ========== 阶段 3：副本故障 ==========
+   * broker-2 宕机
+   * 步骤 3：OfflinePartition
+   *   doHandleStateChanges(Seq("orders-0"), OfflinePartition, None)
+   * 执行结果：
+   *   ✅ controllerContext 标记 orders-0 为 Offline
+   *   ❌ 不发送任何请求
+   *   状态：OfflinePartition
+   *
+   * ========== 阶段 4：重新上线 ==========
+   * 修复了 orders-0 的问题
+   * 步骤 4：OnlinePartition（重新上线）
+   *   doHandleStateChanges(Seq("orders-0"), OnlinePartition, Some(PreferredReplicaPartitionLeaderElectionStrategy))
+   * 执行结果：
+   *   ✅ 重新选举 Leader（排除了 broker-2）
+   *   ✅ 更新 ZK
+   *   ✅ 发送 LeaderAndIsrRequest 给 [broker-0, broker-1]
+   *   ✅ 发送 UpdateMetadataRequest
+   *   状态：OnlinePartition
+   *
    */
   private def doHandleStateChanges(
     partitions: Seq[TopicPartition],
@@ -218,6 +327,13 @@ class ZkPartitionStateMachine(config: KafkaConfig,
     val (validPartitions, invalidPartitions) = controllerContext.checkValidPartitionStateChange(partitions, targetState)
     invalidPartitions.foreach(partition => logInvalidTransition(partition, targetState))
 
+    /**
+     * 核心设计原则：
+     *  职责分离：每个状态只做自己该做的事
+     *  最小化通信：只在必要时发送网络请求
+     *  状态驱动：状态转换自然触发相应的动作
+     * 这种设计避免了不必要的网络开销，同时保证了状态变更的一致性！
+     */
     targetState match {
       case NewPartition =>
         validPartitions.foreach { partition =>
@@ -229,7 +345,18 @@ class ZkPartitionStateMachine(config: KafkaConfig,
       case OnlinePartition =>
         val uninitializedPartitions = validPartitions.filter(partition => partitionState(partition) == NewPartition)
         val partitionsToElectLeader = validPartitions.filter(partition => partitionState(partition) == OfflinePartition || partitionState(partition) == OnlinePartition)
+
+        /**
+         * 为什么只有 OnlinePartition 发请求？
+         * | 状态 | 目的 | 是否发请求 | 原因 |
+         * |------|------|-----------|------|
+         * | **NewPartition** | 加载元数据到缓存 | ❌ | 只是"登记"，还没"激活" |
+         * | **OnlinePartition** | 激活分区，提供服务 | ✅ | 需要通知副本团队组建完成 |
+         * | **OfflinePartition** | 标记分区不可用 | ❌ | 都下线了，没必要通知 |
+         * | **NonExistentPartition** | 删除分区状态 | ❌ | 分区都不存在了 |
+         */
         if (uninitializedPartitions.nonEmpty) {
+          // 初始化时候，默认ISR第一个副本为leader
           val successfulInitializations = initializeLeaderAndIsrForPartitions(uninitializedPartitions)
           successfulInitializations.foreach { partition =>
             stateChangeLog.info(s"Changed partition $partition from ${partitionState(partition)} to $targetState with state " +
@@ -237,6 +364,7 @@ class ZkPartitionStateMachine(config: KafkaConfig,
             controllerContext.putPartitionState(partition, OnlinePartition)
           }
         }
+        //初始化的重新选举leader
         if (partitionsToElectLeader.nonEmpty) {
           val electionResults = electLeaderForPartitions(
             partitionsToElectLeader,
@@ -244,7 +372,6 @@ class ZkPartitionStateMachine(config: KafkaConfig,
               throw new IllegalArgumentException("Election strategy is a required field when the target state is OnlinePartition")
             )
           )
-
           electionResults.foreach {
             case (partition, Right(leaderAndIsr)) =>
               stateChangeLog.info(
@@ -275,11 +402,13 @@ class ZkPartitionStateMachine(config: KafkaConfig,
    */
   private def initializeLeaderAndIsrForPartitions(partitions: Seq[TopicPartition]): Seq[TopicPartition] = {
     val successfulInitializations = mutable.Buffer.empty[TopicPartition]
+    //获取分区对应的副本
     val replicasPerPartition = partitions.map(partition => partition -> controllerContext.partitionReplicaAssignment(partition))
     val liveReplicasPerPartition = replicasPerPartition.map { case (partition, replicas) =>
         val liveReplicasForPartition = replicas.filter(replica => controllerContext.isReplicaOnline(replica, partition))
         partition -> liveReplicasForPartition
     }
+    //分组：有存活分区的副本和没有存活分区的副本
     val (partitionsWithoutLiveReplicas, partitionsWithLiveReplicas) = liveReplicasPerPartition.partition { case (_, liveReplicas) => liveReplicas.isEmpty }
 
     partitionsWithoutLiveReplicas.foreach { case (partition, _) =>
@@ -290,10 +419,11 @@ class ZkPartitionStateMachine(config: KafkaConfig,
       logFailedStateChange(partition, NewPartition, OnlinePartition, new StateChangeFailedException(failMsg))
     }
     val leaderIsrAndControllerEpochs = partitionsWithLiveReplicas.map { case (partition, liveReplicas) =>
-      val leaderAndIsr = LeaderAndIsr(liveReplicas.head, liveReplicas.toList)
+      val leaderAndIsr = LeaderAndIsr(liveReplicas.head, liveReplicas.toList)//默认leader是第一个副本
       val leaderIsrAndControllerEpoch = LeaderIsrAndControllerEpoch(leaderAndIsr, controllerContext.epoch)
       partition -> leaderIsrAndControllerEpoch
     }.toMap
+
     val createResponses = try {
       zkClient.createTopicPartitionStatesRaw(leaderIsrAndControllerEpochs, controllerContext.epochZkVersion)
     } catch {
@@ -369,6 +499,7 @@ class ZkPartitionStateMachine(config: KafkaConfig,
     partitions: Seq[TopicPartition],
     partitionLeaderElectionStrategy: PartitionLeaderElectionStrategy
   ): (Map[TopicPartition, Either[Exception, LeaderAndIsr]], Seq[TopicPartition]) = {
+    //已经初始化过的分区直接去Zookeeper读取数据
     val getDataResponses = try {
       zkClient.getTopicPartitionStatesRaw(partitions)
     } catch {
@@ -416,6 +547,8 @@ class ZkPartitionStateMachine(config: KafkaConfig,
           validLeaderAndIsrs,
           allowUnclean
         )
+        //优先从 ISR 中选择：在副本分配列表 assignment 中，查找同时存在于存活副本 liveReplicas 和 ISR 列表 isr 中的第一个副本。
+        //不洁选举：如果未找到符合条件的副本且启用了不洁选举（uncleanLeaderElectionEnabled），则从存活副本中选择第一个副本作为 Leader。
         leaderForOffline(
           controllerContext,
           isLeaderRecoverySupported,
@@ -423,10 +556,13 @@ class ZkPartitionStateMachine(config: KafkaConfig,
         ).partition(_.leaderAndIsr.isEmpty)
 
       case ReassignPartitionLeaderElectionStrategy =>
+        //在重分配列表 reassignment 中，查找同时存在于存活副本 liveReplicas 和 ISR 列表 isr 中的第一个副本。
         leaderForReassign(controllerContext, validLeaderAndIsrs).partition(_.leaderAndIsr.isEmpty)
       case PreferredReplicaPartitionLeaderElectionStrategy =>
+        //选择分区分配列表 assignment 中的第一个副本作为 Leader，前提是该副本存在于存活副本 liveReplicas 和 ISR 列表 isr 中。
         leaderForPreferredReplica(controllerContext, validLeaderAndIsrs).partition(_.leaderAndIsr.isEmpty)
       case ControlledShutdownPartitionLeaderElectionStrategy =>
+        //在副本分配列表 assignment 中，查找同时存在于存活副本 liveReplicas、ISR 列表 isr 中且不在关闭broker中的副本。
         leaderForControlledShutdown(controllerContext, validLeaderAndIsrs).partition(_.leaderAndIsr.isEmpty)
     }
     partitionsWithoutLeaders.foreach { electionResult =>
@@ -458,7 +594,8 @@ class ZkPartitionStateMachine(config: KafkaConfig,
     (finishedUpdates ++ failedElections, updatesToRetry)
   }
 
-  /* For the provided set of topic partition and partition sync state it attempts to determine if unclean
+  /**
+   * For the provided set of topic partition and partition sync state it attempts to determine if unclean
    * leader election should be performed. Unclean election should be performed if there are no live
    * replica which are in sync and unclean leader election is allowed (allowUnclean parameter is true or
    * the topic has been configured to allow unclean election).
@@ -470,6 +607,42 @@ class ZkPartitionStateMachine(config: KafkaConfig,
    *         1. topic partition
    *         2. leader, isr and controller epoc. Some means election should be performed
    *         3. allow unclean
+   *
+   * 1️⃣ 性能优化（allowUnclean 参数的作用）
+   *         为什么需要 allowUnclean 参数？
+   *         在某些场景下，系统已经确定要进行不洁选举（比如管理员手动触发），此时：
+   *         ✅ 直接跳过 ZooKeeper 配置检查
+   *         ✅ 避免网络 IO 开销
+   *         ✅ 快速完成选举
+   *         2️⃣ 细粒度控制（按主题配置）
+   *         为什么要从 ZooKeeper 读取每个主题的配置？ 不同主题可能有不同的数据一致性要求
+   *         主题 A：payment-transactions（支付交易）
+   *    - 数据一致性至关重要
+   *    - uncleanLeaderElectionEnable = false
+   *
+   *   主题 B：user-clicks（用户点击日志）
+   *    - 可以容忍少量数据丢失
+   *    - uncleanLeaderElectionEnable = true
+   * 3️⃣ 容错处理（failed 映射）
+   *  为什么要处理配置读取失败的情况？
+   *     如果 ZooKeeper 临时不可用或配置节点不存在：采取保守策略：配置读取失败时，默认不允许不洁选举
+   *  设计哲学：在不确定性面前，选择保护数据一致性（宁可不可用，也不丢失数据）
+   *
+   *  graph TD
+   *         A[所有 ISR 副本下线] --> B{allowUnclean?}
+   *         B -->|true| C[直接允许不洁选举]
+   *         B -->|false| D[从 ZooKeeper 读取主题配置]
+   *         D --> E{配置读取成功？}
+   *         E -->|失败 | F[保守处理：禁止不洁选举]
+   *         E -->|成功 | G{uncleanLeaderElectionEnable?}
+   *         G -->|true| H[允许不洁选举]
+   *         G -->|false| I[禁止不洁选举]
+   *
+   *  这个设计体现了 Kafka 的三个核心原则：
+   *    灵活性：支持全局强制和按主题配置两种模式
+   *    性能：通过 allowUnclean 参数避免不必要的 ZooKeeper 访问
+   *    安全性：配置读取失败时采用保守策略，优先保护数据一致性
+   *  这种设计让你可以根据业务需求，在可用性和数据一致性之间做出平衡。
    */
   private def collectUncleanLeaderElectionState(
     leaderAndIsrs: Seq[(TopicPartition, LeaderAndIsr)],
@@ -482,20 +655,22 @@ class ZkPartitionStateMachine(config: KafkaConfig,
     }
 
     val electionForPartitionWithoutLiveReplicas = if (allowUnclean) {
+      // 情况 1：直接允许不洁选举（跳过配置检查
       partitionsWithNoLiveInSyncReplicas.map { case (partition, leaderAndIsr) =>
-        (partition, Option(leaderAndIsr), true)
+        (partition, Option(leaderAndIsr), true) // 第三个参数 true 表示允许不洁选举
       }
-    } else {
+    } else { // 情况 2：需要检查每个主题的独立配置
+      //获取主题对应的配置：/config/topics/$topic
       val (logConfigs, failed) = zkClient.getLogConfigs(
         partitionsWithNoLiveInSyncReplicas.iterator.map { case (partition, _) => partition.topic }.toSet,
         config.originals()
       )
 
       partitionsWithNoLiveInSyncReplicas.map { case (partition, leaderAndIsr) =>
-        if (failed.contains(partition.topic)) {
+        if (failed.contains(partition.topic)) {// ZooKeeper 读取失败，保守处理：不允许不洁选举
           logFailedStateChange(partition, partitionState(partition), OnlinePartition, failed(partition.topic))
           (partition, None, false)
-        } else {
+        } else { // 从 ZooKeeper 获取该主题的 uncleanLeaderElectionEnable 配置
           (
             partition,
             Option(leaderAndIsr),
@@ -558,6 +733,7 @@ object PartitionLeaderElectionAlgorithms {
    * 逻辑：在重分配列表 reassignment 中，查找同时存在于存活副本 liveReplicas 和 ISR 列表 isr 中的第一个副本。
    */
   def reassignPartitionLeaderElection(reassignment: Seq[Int], isr: Seq[Int], liveReplicas: Set[Int]): Option[Int] = {
+    //使用 find - 查找第一个符合条件的元素
     reassignment.find(id => liveReplicas.contains(id) && isr.contains(id))
   }
 
@@ -566,12 +742,13 @@ object PartitionLeaderElectionAlgorithms {
    * 逻辑：选择分区分配列表 assignment 中的第一个副本作为 Leader，前提是该副本存在于存活副本 liveReplicas 和 ISR 列表 isr 中。
    */
   def preferredReplicaPartitionLeaderElection(assignment: Seq[Int], isr: Seq[Int], liveReplicas: Set[Int]): Option[Int] = {
+    // 使用 headOption.filter - 只检查第一个元素是否符合条件
     assignment.headOption.filter(id => liveReplicas.contains(id) && isr.contains(id))
   }
 
   /**
    * 作用：在受控关闭过程中选举 Leader。
-   * 逻辑：在副本分配列表 assignment 中，查找同时存在于存活副本 liveReplicas、ISR 列表 isr 中且不在关闭中的副本。
+   * 逻辑：在副本分配列表 assignment 中，查找同时存在于存活副本 liveReplicas、ISR 列表 isr 中且不在关闭broker中的副本。
    */
   def controlledShutdownPartitionLeaderElection(assignment: Seq[Int], isr: Seq[Int], liveReplicas: Set[Int], shuttingDownBrokers: Set[Int]): Option[Int] = {
     assignment.find(id => liveReplicas.contains(id) && isr.contains(id) && !shuttingDownBrokers.contains(id))

@@ -40,13 +40,20 @@ public final class Cluster {
     private final Set<String> invalidTopics;
     private final Set<String> internalTopics;
     private final Node controller;
+    //(topic,partition) -> PartitionInfo 通过(topic,partition)快速查找到对应的分区信息
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
+    // topic -> List<PartitionInfo> 通过主题id快速查找到对应的所有分区信息
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    // topic -> List<PartitionInfo> 通过主题id快速查找到有leader即可用的所有分区信息
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
+    // nodeId -> List<PartitionInfo> 通过节点id快速获取当前节点上存在的所有分区信息
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
+    //nodeId -> node 通过nodeId快速获取到对应的node
     private final Map<Integer, Node> nodesById;
     private final ClusterResource clusterResource;
+    // topic -> uuid 通过主题快速查找对应的唯一编码
     private final Map<String, Uuid> topicIds;
+    // uuid -> topic 通过唯一编码快速查找对应的topic
     private final Map<Uuid, String> topicNames;
 
     /**
@@ -117,6 +124,7 @@ public final class Cluster {
                     Node controller,
                     Map<String, Uuid> topicIds) {
         this.isBootstrapConfigured = isBootstrapConfigured;
+        //封装 clusterId
         this.clusterResource = new ClusterResource(clusterId);
         // make a randomized, unmodifiable copy of the nodes
         List<Node> copy = new ArrayList<>(nodes);
@@ -125,6 +133,7 @@ public final class Cluster {
 
         // Index the nodes for quick lookup
         Map<Integer, Node> tmpNodesById = new HashMap<>();
+        //通过节点id快速获取当前节点上的分区信息
         Map<Integer, List<PartitionInfo>> tmpPartitionsByNode = new HashMap<>(nodes.size());
         for (Node node : nodes) {
             tmpNodesById.put(node.id(), node);
@@ -136,8 +145,9 @@ public final class Cluster {
 
         // index the partition infos by topic, topic+partition, and node
         // note that this code is performance sensitive if there are a large number of partitions so we are careful
-        // to avoid unnecessary work
+        // to avoid unnecessary work 通过主题分区快速查找到对应的分区信息
         Map<TopicPartition, PartitionInfo> tmpPartitionsByTopicPartition = new HashMap<>(partitions.size());
+        // 通过主题id快速查找到对应的分区信息
         Map<String, List<PartitionInfo>> tmpPartitionsByTopic = new HashMap<>();
         for (PartitionInfo p : partitions) {
             tmpPartitionsByTopicPartition.put(new TopicPartition(p.topic(), p.partition()), p);
@@ -158,12 +168,13 @@ public final class Cluster {
         }
 
         // Populate `tmpAvailablePartitionsByTopic` and update the values of `tmpPartitionsByTopic` to contain
-        // unmodifiable lists
+        // unmodifiable lists 通过主题id快速查找到有leader的分区信息
         Map<String, List<PartitionInfo>> tmpAvailablePartitionsByTopic = new HashMap<>(tmpPartitionsByTopic.size());
         for (Map.Entry<String, List<PartitionInfo>> entry : tmpPartitionsByTopic.entrySet()) {
             String topic = entry.getKey();
             List<PartitionInfo> partitionsForTopic = Collections.unmodifiableList(entry.getValue());
             tmpPartitionsByTopic.put(topic, partitionsForTopic);
+
             // Optimise for the common case where all partitions are available
             boolean foundUnavailablePartition = partitionsForTopic.stream().anyMatch(p -> p.leader() == null);
             List<PartitionInfo> availablePartitionsForTopic;

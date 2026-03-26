@@ -38,6 +38,33 @@ class StateChangeLogger(brokerId: Int, inControllerContext: Boolean, controllerE
 
   locally {
     val prefix = if (inControllerContext) "Controller" else "Broker"
+    /**
+     * 作用：处理 Option 类型
+     * 参数：
+     *  ifEmpty：当 Option 为 None 时返回的值
+     *  f：当 Option 为 Some(value) 时应用的函数
+     *
+     * 这段代码等价于：
+     * // 展开写法
+     * val epochEntry = controllerEpoch match {
+     * case None => ""                    // 如果是 None，返回空字符串
+     * case Some(epoch) => s" epoch=$epoch"  // 如果是 Some(epoch)，返回 " epoch=数字"
+     * }
+     *
+     * // 示例 1: controllerEpoch = None
+     * val controllerEpoch: Option[Int] = None
+     * val epochEntry = controllerEpoch.fold("")(epoch => s" epoch=$epoch")
+     * // 结果：epochEntry = ""
+     * // logIdent = "[Controller id=1]"
+     *
+     * // 示例 2: controllerEpoch = Some(5)
+     * val controllerEpoch: Option[Int] = Some(5)
+     * val epochEntry = controllerEpoch.fold("")(epoch => s" epoch=$epoch")
+     * // 结果：epochEntry = " epoch=5"
+     * // logIdent = "[Controller id=1 epoch=5]"
+     *
+     *
+     */
     val epochEntry = controllerEpoch.fold("")(epoch => s" epoch=$epoch")
     logIdent = s"[$prefix id=$brokerId$epochEntry] "
   }

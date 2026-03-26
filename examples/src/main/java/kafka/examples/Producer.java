@@ -114,7 +114,7 @@ public class Producer extends Thread {
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, IntegerSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         if (transactionTimeoutMs > 0) {
-            // max time before the transaction coordinator proactively aborts the ongoing transaction
+            // max time before the transaction coordinator proactively(主动) aborts the ongoing transaction
             props.put(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, transactionTimeoutMs);
         }
         if (transactionalId != null) {

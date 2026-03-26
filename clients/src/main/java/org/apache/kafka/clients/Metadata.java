@@ -66,20 +66,20 @@ import static org.apache.kafka.common.record.RecordBatch.NO_PARTITION_LEADER_EPO
  */
 public class Metadata implements Closeable {
     private final Logger log;
-    private final ExponentialBackoff refreshBackoff;
-    private final long metadataExpireMs;
-    private int updateVersion;  // bumped on every metadata response
+    private final ExponentialBackoff refreshBackoff;// 指数退避算法
+    private final long metadataExpireMs;// 元数据过期时间
+    private int updateVersion;  // bumped(碰撞) on every metadata response
     private int requestVersion; // bumped on every new topic addition
-    private long lastRefreshMs;
-    private long lastSuccessfulRefreshMs;
-    private long attempts;
+    private long lastRefreshMs; // 上次尝试刷新的时间
+    private long lastSuccessfulRefreshMs; // 上次成功刷新的时间
+    private long attempts;// 连续失败次数
     private KafkaException fatalException;
     private Set<String> invalidTopics;
     private Set<String> unauthorizedTopics;
     private volatile MetadataSnapshot metadataSnapshot = MetadataSnapshot.empty();
     private boolean needFullUpdate;
     private boolean needPartialUpdate;
-    private long equivalentResponseCount;
+    private long equivalentResponseCount;// 连续等效响应次数
     private final ClusterResourceListeners clusterResourceListeners;
     private boolean isClosed;
     private final Map<TopicPartition, Integer> lastSeenLeaderEpochs;
@@ -148,19 +148,45 @@ public class Metadata implements Closeable {
      * not be delayed if this method returns 0.
      *
      * @param nowMs current time in ms
-     * @return remaining time in ms till the cluster info can be updated again
+     * @return remaining time in ms till the cluster info can be updated again 距离下次允许更新的毫秒数（返回 0 表示可以立即更新）
+     *
+     * 计算距离下次允许更新元数据还需要等待多长时间，核心目的是防止元数据刷新过于频繁，减少对 broker 的压力
+     *
+     * 核心逻辑：两种退避机制
+     *  该方法计算两个退避时间，取较大值:返回 0 表示可以立即更新，否则调用者需要等待返回的时间后再重试
+     *  两种退避的区别
+     *   ┌────────────┬───────────────────────────────────┬─────────────────────────┬───────────────────────────────────────┐
+     *   │    场景     │             触发条件              │         计数器            │               何时重置                │
+     *   ├────────────┼───────────────────────────────────┼─────────────────────────┼───────────────────────────────────────┤
+     *   │ 失败退避    │ broker 不可用、网络错误等            │ attempts                │ 成功更新时 (update() 中 attempts = 0) │
+     *   ├────────────┼───────────────────────────────────┼─────────────────────────┼───────────────────────────────────────┤
+     *   │ 无进展退避   │ leader epoch 无变化、响应内容相同    │ equivalentResponseCount │ leader epoch 变化 或 元数据过期       │
+     *   └────────────┴───────────────────────────────────┴─────────────────────────┴───────────────────────────────────────┘
+     *
+     * 示例流程:
+     *   时刻 T0: 请求元数据 → 失败 → attempts=1, lastRefreshMs=T0
+     *   时刻 T1: 调用 timeToAllowUpdate(now=T1) → 返回 backoffForAttempts (如 100ms)
+     *   时刻 T2(>T0+100ms): 再次请求 → 成功 → attempts=0, lastSuccessfulRefreshMs=T2
+     *   时刻 T3: 再次请求 → leader epoch 未变 → equivalentResponseCount=1
+     *   时刻 T4: 调用 timeToAllowUpdate → 可能返回 backoffForEquivalentResponseCount
      */
     public synchronized long timeToAllowUpdate(long nowMs) {
         // Calculate the backoff for attempts which acts when metadata responses fail
+        // 失败重试退避，当元数据请求失败时会触发（attempts 计数）：
+        //   attempts：记录连续失败的次数（在 failedUpdate() 方法中递增）
+        //   refreshBackoff：使用指数退避算法，失败次数越多，退避时间越长
         long backoffForAttempts = Math.max(this.lastRefreshMs +
                 this.refreshBackoff.backoff(this.attempts > 0 ? this.attempts - 1 : 0) - nowMs, 0);
 
-        // Periodic updates based on expiration resets the equivalent response count so exponential backoff is not used
-        if (Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0) == 0) {
-            this.equivalentResponseCount = 0;
+        // Periodic updates based on expiration resets the equivalent(相同的) response count so exponential backoff is not used
+        //  基于过期时间的定期更新会重置等效响应计数，因此不使用指数退避算法
+        if (Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0) == 0) {// 大于0说明没到元数据过期时间， 0的时候说明元数据过期了
+            this.equivalentResponseCount = 0; //记录连续收到"等效响应"的次数 元数据过期时重置此计数
         }
 
-        // Calculate the backoff for equivalent responses which acts when metadata responses are not making progress
+        // Calculate the backoff for equivalent responses which acts(生效) when metadata responses are not making progress
+        // 计算等效响应的退避时间，该退避在元数据响应未取得进展时生效
+        // backoffForEquivalentResponseCount - 无进展退避,当元数据响应无实质进展时触发
         long backoffForEquivalentResponseCount = Math.max(this.lastRefreshMs +
                 (this.equivalentResponseCount > 0 ? this.refreshBackoff.backoff(this.equivalentResponseCount - 1) : 0) - nowMs, 0);
 
@@ -173,10 +199,95 @@ public class Metadata implements Closeable {
      * expiry time is now.
      *
      * @param nowMs current time in ms
-     * @return remaining time in ms till updating the cluster info
+     * @return remaining time in ms till updating the cluster info 距离下次更新还需要等待的毫秒数（返回 0 表示应该立即更新）
+     *
+     * 计算距离下次元数据更新的时间，综合了三个因素：过期时间、退避时间、是否显式请求更新
+     * 结合了"过期时间"和"退避时间"两个维度，确保元数据更新既不会过于频繁（退避），也不会过于陈旧（过期）
      */
     public synchronized long timeToNextUpdate(long nowMs) {
+        /**
+         * - 如果 updateRequested() 返回 true（即 needFullUpdate 或 needPartialUpdate 为 true）→ timeToExpire = 0
+         *     - 表示有显式更新请求，忽略过期时间，可以立即更新
+         * - 否则 → 计算距离元数据过期还有多久
+         *     - lastSuccessfulRefreshMs + metadataExpireMs - nowMs
+         *     - 如果已经是负数（已过期），用 Math.max(..., 0) 修正为 0
+         */
         long timeToExpire = updateRequested() ? 0 : Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0);
+        // timeToExpire:元数据过期时间
+        // timeToAllowUpdate:获取基于退避策略的最小等待时间
+        // 同时满足过期时间和退避时间的要求，取较晚的那个作为下次更新时间。
+        /**
+         * 三种更新触发条件
+         *   ┌────────────────┬──────────────────────────────────────────────────┬──────────────┬───────────────────┬──────────┐
+         *   │      条件       │                     计算方式                      │ timeToExpire │ timeToAllowUpdate │   结果   │
+         *   ├────────────────┼──────────────────────────────────────────────────┼──────────────┼───────────────────┼──────────┤
+         *   │ 显式请求更新     │ updateRequested()=true                           │ 0            │ 退避时间           │ 退避时间 │
+         *   ├────────────────┼──────────────────────────────────────────────────┼──────────────┼───────────────────┼──────────┤
+         *   │ 元数据已过期     │ now > lastSuccessfulRefreshMs + metadataExpireMs │ 0            │ 退避时间           │ 退避时间 │
+         *   ├────────────────┼──────────────────────────────────────────────────┼──────────────┼───────────────────┼──────────┤
+         *   │ 未过期且无请求   │ 正常状态                                           │ 剩余过期时间   │ 退避时间           │ 取较大值 │
+         *   └────────────────┴──────────────────────────────────────────────────┴──────────────┴───────────────────┴──────────┘
+         *
+         * 与 timeToAllowUpdate 的关系
+         *
+         *   timeToNextUpdate()
+         *       ├── timeToExpire（过期维度）
+         *       │   └── 受 metadataExpireMs 和显式请求影响
+         *       │
+         *       └── timeToAllowUpdate（退避维度）
+         *           ├── backoffForAttempts（失败重试）
+         *           └── backoffForEquivalentResponseCount（无进展）
+         *
+         * 示例场景
+         *   场景 1：正常情况（未过期，无请求）
+         *   lastSuccessfulRefreshMs = 1000
+         *   metadataExpireMs = 30000
+         *   nowMs = 5000
+         *
+         *   timeToExpire = 1000 + 30000 - 5000 = 26000
+         *   timeToAllowUpdate = 0 (没有失败或等效响应)
+         *
+         *   返回: max(26000, 0) = 26000  // 还要等26秒
+         *
+         *   场景 2：元数据已过期
+         *   lastSuccessfulRefreshMs = 1000
+         *   metadataExpireMs = 30000
+         *   nowMs = 40000
+         *
+         *   timeToExpire = max(1000 + 30000 - 40000, 0) = 0  // 已过期
+         *   timeToAllowUpdate = 0
+         *
+         *   返回: max(0, 0) = 0  // 立即更新
+         *
+         *   场景 3：显式请求更新
+         *   needFullUpdate = true  // 比如新加入一个 topic
+         *   nowMs = 5000
+         *
+         *   timeToExpire = 0  // 被强制设为0
+         *   timeToAllowUpdate = 100  // 退避100ms
+         *
+         *   返回: max(0, 100) = 100  // 只受退避时间限制
+         *
+         *   场景 4：多次失败后
+         *   attempts = 3
+         *   lastRefreshMs = 4000
+         *   nowMs = 5000
+         *
+         *   timeToExpire = 26000 (假设未过期)
+         *   timeToAllowUpdate = backoff(2) ≈ 200ms (指数退避)
+         *
+         *   返回: max(26000, 200) = 26000  // 还是受过期时间限制
+         *
+         *   场景 5：元数据过期 + 多次失败
+         *   attempts = 3
+         *   lastRefreshMs = 4000
+         *   nowMs = 40000 (元数据已过期)
+         *
+         *   timeToExpire = 0
+         *   timeToAllowUpdate = 200
+         *
+         *   返回: max(0, 200) = 200  // 受退避时间限制
+         */
         return Math.max(timeToExpire, timeToAllowUpdate(nowMs));
     }
 

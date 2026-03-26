@@ -61,7 +61,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * This class acts as a queue that accumulates records into {@link MemoryRecords}
+ * This class acts as a queue that accumulates(积累) records into {@link MemoryRecords}
  * instances to be sent to the server.
  * <p>
  * The accumulator uses a bounded amount of memory and append calls will block when that memory is exhausted, unless
@@ -666,13 +666,15 @@ public class RecordAccumulator {
                                 TopicInfo topicInfo,
                                 long nextReadyCheckDelayMs, Set<Node> readyNodes, Set<String> unknownLeaderTopics) {
         ConcurrentMap<Integer, Deque<ProducerBatch>> batches = topicInfo.batches;
-        // Collect the queue sizes for available partitions to be used in adaptive partitioning.
+        // Collect the queue sizes for available partitions to be used in adaptive(自适应) partitioning.
         int[] queueSizes = null;
         int[] partitionIds = null;
-        if (enableAdaptivePartitioning && batches.size() >= metadataSnapshot.cluster().partitionsForTopic(topic).size()) {
-            // We don't do adaptive partitioning until we scheduled at least a batch for all
-            // partitions (i.e. we have the corresponding entries in the batches map), we just
-            // do uniform.  The reason is that we build queue sizes from the batches map,
+        // 自适应分区器
+        if (enableAdaptivePartitioning
+                && batches.size() >= metadataSnapshot.cluster().partitionsForTopic(topic).size()) {
+            // We don't do adaptive partitioning until we scheduled at least a batch for all partitions
+            // (i.e. we have the corresponding entries in the batches map), we just do uniform.
+            // The reason is that we build queue sizes from the batches map,
             // and if an entry is missing in the batches map, then adaptive partitioning logic
             // won't know about it and won't switch to it.
             queueSizes = new int[batches.size()];
@@ -680,7 +682,8 @@ public class RecordAccumulator {
         }
 
         int queueSizesIndex = -1;
-        boolean exhausted = this.free.queued() > 0;
+        // 等待的大于0 说明出现了阻塞的情况
+        boolean exhausted = this.free.queued() > 0; //exhausted:枯竭的 用完的
         for (Map.Entry<Integer, Deque<ProducerBatch>> entry : batches.entrySet()) {
             TopicPartition part = new TopicPartition(topic, entry.getKey());
             // Advance queueSizesIndex so that we properly index available
@@ -696,7 +699,7 @@ public class RecordAccumulator {
             Deque<ProducerBatch> deque = entry.getValue();
 
             final long waitedTimeMs;
-            final boolean backingOff;
+            final boolean backingOff;//回退
             final int backoffAttempts;
             final int dequeSize;
             final boolean full;
@@ -723,7 +726,7 @@ public class RecordAccumulator {
                 waitedTimeMs = batch.waitedTimeMs(nowMs);
                 batch.maybeUpdateLeaderEpoch(leaderEpoch);
                 backingOff = shouldBackoff(batch.hasLeaderChangedForTheOngoingRetry(), batch, waitedTimeMs);
-                backoffAttempts = batch.attempts();
+                backoffAttempts = batch.attempts(); //backoff:回退
                 dequeSize = deque.size();
                 full = dequeSize > 1 || batch.isFull();
             }
@@ -787,7 +790,7 @@ public class RecordAccumulator {
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         Set<String> unknownLeaderTopics = new HashSet<>();
         // Go topic by topic so that we can get queue sizes for partitions in a topic and calculate
-        // cumulative frequency table (used in partitioner).
+        // cumulative(累积) frequency table (used in partitioner).
         for (Map.Entry<String, TopicInfo> topicInfoEntry : this.topicInfoMap.entrySet()) {
             final String topic = topicInfoEntry.getKey();
             nextReadyCheckDelayMs = partitionReady(metadataSnapshot, nowMs, topic, topicInfoEntry.getValue(), nextReadyCheckDelayMs, readyNodes, unknownLeaderTopics);
@@ -1264,6 +1267,7 @@ public class RecordAccumulator {
      * Per topic info.
      */
     private static class TopicInfo {
+        // partitionId -> Deque<ProducerBatch> 一个分区对应一个发送队列
         public final ConcurrentMap<Integer /*partition*/, Deque<ProducerBatch>> batches = new CopyOnWriteMap<>();
         public final BuiltInPartitioner builtInPartitioner;
 
@@ -1273,7 +1277,7 @@ public class RecordAccumulator {
     }
 
     /**
-     * Node latency stats for each node that are used for adaptive partition distribution
+     * Node latency(延迟) stats for each node that are used for adaptive partition distribution
      * Visible for testing
      */
     public static final class NodeLatencyStats {

@@ -25,8 +25,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Maintains node api versions for access outside of NetworkClient (which is where the information is derived).
- * The pattern is akin to the use of {@link Metadata} for topic metadata.
+ * Maintains node api versions for access outside of NetworkClient (which is where the information is derived(获取)).
+ * The pattern is akin to(类似于) the use of {@link Metadata} for topic metadata.
  *
  * NOTE: This class is intended for INTERNAL usage only within Kafka.
  */

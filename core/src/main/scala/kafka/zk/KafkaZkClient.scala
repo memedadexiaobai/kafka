@@ -260,6 +260,7 @@ class KafkaZkClient private[zk] (
   }
 
   private def maybeCreateControllerEpochZNode(): (Int, Int) = {
+    // 初始化值为 0
     createControllerEpochRaw(KafkaController.InitialControllerEpoch).resultCode match {
       case Code.OK =>
         info(s"Successfully created ${ControllerEpochZNode.path} with initial epoch ${KafkaController.InitialControllerEpoch}")
@@ -315,10 +316,12 @@ class KafkaZkClient private[zk] (
    * @return sequence of CreateResponse whose contexts are the partitions they are associated with.
    */
   def createTopicPartitionStatesRaw(leaderIsrAndControllerEpochs: Map[TopicPartition, LeaderIsrAndControllerEpoch], expectedControllerEpochZkVersion: Int): Seq[CreateResponse] = {
+    //创建节点 /brokers/topics/$topic/partitions
     createTopicPartitions(leaderIsrAndControllerEpochs.keys.map(_.topic).toSeq.distinct, expectedControllerEpochZkVersion)
+    //创建节点 /brokers/topics/$topic/partitions/$partition(分区号)
     createTopicPartition(leaderIsrAndControllerEpochs.keys.toSeq, expectedControllerEpochZkVersion)
     val createRequests = leaderIsrAndControllerEpochs.map { case (partition, leaderIsrAndControllerEpoch) =>
-      val path = TopicPartitionStateZNode.path(partition)
+      val path = TopicPartitionStateZNode.path(partition)// /brokers/topics/$topic/partitions/$partition(分区号)/state
       val data = TopicPartitionStateZNode.encode(leaderIsrAndControllerEpoch)
       CreateRequest(path, data, defaultAcls(path), CreateMode.PERSISTENT, Some(partition))
     }
@@ -359,6 +362,7 @@ class KafkaZkClient private[zk] (
     controllerEpoch: Int,
     expectedControllerEpochZkVersion: Int
   ): UpdateLeaderAndIsrResult = {
+
     val leaderIsrAndControllerEpochs = leaderAndIsrs.map { case (partition, leaderAndIsr) =>
       partition -> LeaderIsrAndControllerEpoch(leaderAndIsr, controllerEpoch)
     }
@@ -404,7 +408,7 @@ class KafkaZkClient private[zk] (
     val logConfigs = mutable.Map.empty[String, LogConfig]
     val failed = mutable.Map.empty[String, Exception]
     val configResponses = try {
-      getTopicConfigs(topics)
+      getTopicConfigs(topics) // 获取配置：/config/topics/$topic
     } catch {
       case e: Exception =>
         topics.foreach(topic => failed.put(topic, e))
@@ -591,7 +595,9 @@ class KafkaZkClient private[zk] (
     * @return map of broker to epoch in the cluster.
     */
   def getAllBrokerAndEpochsInCluster: Map[Broker, Long] = {
+    // /brokers/ids
     val brokerIds = getSortedBrokerList
+    // 获取 /brokers/ids/{id}下的所有数据
     val getDataRequests = brokerIds.map(brokerId => GetDataRequest(BrokerIdZNode.path(brokerId), ctx = Some(brokerId)))
     val getDataResponses = retryRequestsUntilConnected(getDataRequests)
     getDataResponses.flatMap { getDataResponse =>
@@ -1275,6 +1281,7 @@ class KafkaZkClient private[zk] (
    * @return optional integer that is Some if the controller znode exists and can be parsed and None otherwise.
    */
   def getControllerId: Option[Int] = {
+    // /controller
     val getDataRequest = GetDataRequest(ControllerZNode.path)
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
     getDataResponse.resultCode match {
@@ -1309,6 +1316,7 @@ class KafkaZkClient private[zk] (
    * @return optional (Int, Stat) that is Some if the controller epoch path exists and None otherwise.
    */
   def getControllerEpoch: Option[(Int, Stat)] = {
+    // /controller_epoch
     val getDataRequest = GetDataRequest(ControllerEpochZNode.path)
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
     getDataResponse.resultCode match {
@@ -1945,7 +1953,7 @@ class KafkaZkClient private[zk] (
 
   private def createTopicPartition(partitions: Seq[TopicPartition], expectedControllerEpochZkVersion: Int): Seq[CreateResponse] = {
     val createRequests = partitions.map { partition =>
-      val path = TopicPartitionZNode.path(partition)
+      val path = TopicPartitionZNode.path(partition) // /brokers/topics/$topic/partitions/$partition(分区号)
       CreateRequest(path, null, defaultAcls(path), CreateMode.PERSISTENT, Some(partition))
     }
     retryRequestsUntilConnected(createRequests, expectedControllerEpochZkVersion)
@@ -1953,7 +1961,7 @@ class KafkaZkClient private[zk] (
 
   private def createTopicPartitions(topics: Seq[String], expectedControllerEpochZkVersion: Int): Seq[CreateResponse] = {
     val createRequests = topics.map { topic =>
-      val path = TopicPartitionsZNode.path(topic)
+      val path = TopicPartitionsZNode.path(topic) // /brokers/topics/$topic/partitions
       CreateRequest(path, null, defaultAcls(path), CreateMode.PERSISTENT, Some(topic))
     }
     retryRequestsUntilConnected(createRequests, expectedControllerEpochZkVersion)
@@ -1961,7 +1969,7 @@ class KafkaZkClient private[zk] (
 
   private def getTopicConfigs(topics: Set[String]): Seq[GetDataResponse] = {
     val getDataRequests: Seq[GetDataRequest] = topics.iterator.map { topic =>
-      GetDataRequest(ConfigEntityZNode.path(ConfigType.TOPIC, topic), ctx = Some(topic))
+      GetDataRequest(ConfigEntityZNode.path(ConfigType.TOPIC, topic), ctx = Some(topic))//  /config/topics/$topic
     }.toBuffer
 
     retryRequestsUntilConnected(getDataRequests)

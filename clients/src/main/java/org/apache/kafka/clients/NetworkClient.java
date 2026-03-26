@@ -478,8 +478,9 @@ public class NetworkClient implements KafkaClient {
      * @param now the current timestamp
      */
     private boolean canSendRequest(String node, long now) {
-        return connectionStates.isReady(node, now) && selector.isChannelReady(node) &&
-            inFlightRequests.canSendMore(node);
+        return connectionStates.isReady(node, now)
+                && selector.isChannelReady(node)
+                && inFlightRequests.canSendMore(node);
     }
 
     /**
@@ -719,7 +720,39 @@ public class NetworkClient implements KafkaClient {
 
         int offset = this.randOffset.nextInt(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
-            int idx = (offset + i) % nodes.size();
+            /**
+             *  均匀分布请求：
+             *      通过随机偏移量 offset，请求从一个随机的起始点开始遍历节点列表，避免了总是从固定节点开始请求，从而提高了请求的均匀分布。
+             *  避免热点：
+             *      随机偏移可以避免某些节点因始终被优先请求而成为热点，从而减轻这些节点的负载压力。
+             *  鲁棒性：
+             *      即使节点列表发生变化（如节点上下线），通过循环遍历和取模运算，代码仍然能够正确地遍历所有可用节点。
+             *  简单易懂：
+             *      代码逻辑简单明了，通过随机偏移和循环遍历结合取模运算，确保请求均匀分布
+             *
+             * 1. 确保遍历所有节点
+             *  通过在 offset 的基础上加 i，可以确保在循环中依次访问到 nodes 列表中的每个节点。i 从 0 开始，每次循环递增 1，从而逐步推进索引。
+             * 2. 处理节点列表的环形结构
+             *  使用 (offset + i) % nodes.size() 可以将索引限制在 nodes 列表的范围内。当 offset + i 超过 nodes.size() 时，取模运算会将其调整为一个有效的索引，从而实现环形遍历。
+             * 3. 均匀分布请求
+             *  这种写法确保了请求能够均匀地分布在所有节点上。通过随机偏移和环形遍历的结合，避免了总是从固定节点开始请求，从而提高了负载均衡的效果。
+             * 4. 避免热点
+             *  通过随机偏移和环形遍历，可以避免某些节点因始终被优先请求而成为热点，从而减轻这些节点的负载压力。
+             * 5. 鲁棒性
+             *  即使节点列表发生变化（如节点上下线），这种写法仍然能够正确地遍历所有可用节点，确保请求的均匀分布。
+             * 6. 简单易懂
+             *  代码逻辑简单明了，通过随机偏移和循环遍历结合取模运算，确保请求均匀分布。
+             *
+             * 示例解释：
+             *  假设 nodes.size() 为 5，offset 为 2：
+             *  当 i = 0 时，(2 + 0) % 5 = 2，访问索引 2。
+             *  当 i = 1 时，(2 + 1) % 5 = 3，访问索引 3。
+             *  当 i = 2 时，(2 + 2) % 5 = 4，访问索引 4。
+             *  当 i = 3 时，(2 + 3) % 5 = 0，访问索引 0。
+             *  当 i = 4 时，(2 + 4) % 5 = 1，访问索引 1。
+             * 通过这种方式，代码能够均匀地遍历所有节点，避免了请求集中在某个节点上。
+             */
+            int idx = (offset + i) % nodes.size();// 在随机偏移的基础上，依次访问每个节点，同时确保索引在有效范围内。
             Node node = nodes.get(idx);
 
             if (!atLeastOneConnectionReady

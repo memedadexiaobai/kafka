@@ -421,7 +421,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.compression = configureCompression(config);
 
             this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
-            int deliveryTimeoutMs = configureDeliveryTimeout(config, log);
+            int deliveryTimeoutMs = configureDeliveryTimeout(config, log);// delivery:交付
 
             this.apiVersions = new ApiVersions();
             this.transactionManager = configureTransactionState(config, logContext);
@@ -440,7 +440,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.accumulator = new RecordAccumulator(logContext,
                     batchSize,
                     compression,
-                    lingerMs(config),
+                    lingerMs(config),// linger:徘徊、逗留、留存
                     retryBackoffMs,
                     retryBackoffMaxMs,
                     deliveryTimeoutMs,
@@ -527,8 +527,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     Sender newSender(LogContext logContext, KafkaClient kafkaClient, ProducerMetadata metadata) {
         int maxInflightRequests = producerConfig.getInt(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION);
         int requestTimeoutMs = producerConfig.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+
         ProducerMetrics metricsRegistry = new ProducerMetrics(this.metrics);
         Sensor throttleTimeSensor = Sender.throttleTimeSensor(metricsRegistry.senderMetrics);
+
         KafkaClient client = kafkaClient != null ? kafkaClient : ClientUtils.createNetworkClient(producerConfig,
                 this.metrics,
                 "producer",
@@ -611,7 +613,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                                                          LogContext logContext) {
         TransactionManager transactionManager = null;
 
-        if (config.getBoolean(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG)) {
+        if (config.getBoolean(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG)) {//幂等性配置
             final String transactionalId = config.getString(ProducerConfig.TRANSACTIONAL_ID_CONFIG);
             final int transactionTimeoutMs = config.getInt(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);
             final long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
@@ -1058,8 +1060,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
             // Try to calculate partition, but note that after this call it can be RecordMetadata.UNKNOWN_PARTITION,
             // which means that the RecordAccumulator would pick a partition using built-in logic (which may
-            // take into account broker load, the amount of data produced to each partition, etc.).
-            int partition = partition(record, serializedKey, serializedValue, cluster);
+            // take into account(词组：考虑到) broker load, the amount of data produced to each partition, etc.).
+            int partition = partition(record, serializedKey, serializedValue, cluster); //返回分配的分区号
 
             setReadOnly(record.headers());
             Header[] headers = record.headers().toArray();
@@ -1069,7 +1071,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             ensureValidRecordSize(serializedSize);
             long timestamp = record.timestamp() == null ? nowMs : record.timestamp();
 
-            // A custom partitioner may take advantage on the onNewBatch callback.
+            // A custom partitioner may take advantage(词组：利用，借用) on the onNewBatch callback.
             boolean abortOnNewBatch = partitioner != null;
 
             // Append the record to the accumulator.  Note, that the actual partition may be
@@ -1153,6 +1155,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long nowMs, long maxWaitMs) throws InterruptedException {
         Cluster cluster = metadata.fetch();
 
+        //不能是无效主题
         if (cluster.invalidTopics().contains(topic))
             throw new InvalidTopicException(topic);
 
@@ -1161,7 +1164,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
         // Return cached metadata if we have it, and if the record's partition is either undefined
-        // or within the known partition range
+        // or within the known partition range 本地有元数据，同时要求的这个分区号在元数据分区号之内直接返回
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
             return new ClusterAndWaitTime(cluster, 0);
 
@@ -1170,6 +1173,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         // Issue metadata requests until we have metadata for the topic and the requested partition,
         // or until maxWaitTimeMs is exceeded. This is necessary in case the metadata
         // is stale and the number of partitions for this topic has increased in the meantime.
+        // 本地没这个分区的元数据 或者 请求的这个分区号不在本地元数据的范围之内
         long nowNanos = time.nanoseconds();
         do {
             if (partition != null) {
@@ -1177,6 +1181,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             } else {
                 log.trace("Requesting metadata update for topic {}.", topic);
             }
+            //保持主题元数据不过期
             metadata.add(topic, nowMs + elapsed);
             int version = metadata.requestUpdateForTopic(topic);
             sender.wakeup();

@@ -20,7 +20,7 @@ package org.apache.kafka.common;
 import java.util.Objects;
 
 /**
- * The <code>ClusterResource</code> class encapsulates metadata for a Kafka cluster.
+ * The <code>ClusterResource</code> class encapsulates(封装) metadata for a Kafka cluster.
  */
 public class ClusterResource {
 

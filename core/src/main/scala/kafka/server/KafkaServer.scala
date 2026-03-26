@@ -271,7 +271,6 @@ class KafkaServer(
         initialMetaPropsEnsemble.verify(Optional.of(_clusterId), verificationId, verificationFlags)
 
 
-        /* generate brokerId 优先  config.brokerId */
         config._brokerId = getOrGenerateBrokerId(initialMetaPropsEnsemble)
         config._nodeId = config.brokerId
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
@@ -406,7 +405,7 @@ class KafkaServer(
         // that credentials(证书) have been loaded before processing authentications.
         //
         // Note that we allow the use of KRaft mode controller APIs when forwarding is enabled
-        // so that the Envelope request is exposed. This is only used in testing currently.
+        // so that the Envelope(信封) request is exposed. This is only used in testing currently.
         socketServer = new SocketServer(config, metrics, time, credentialProvider, apiVersionManager)
 
         // Start alter partition manager based on the IBP version
@@ -541,7 +540,7 @@ class KafkaServer(
           metrics
         )
         // 里边有诸多和组操作的相关操作
-        groupCoordinat or.startup(() => zkClient.getTopicPartitionCount(Topic.GROUP_METADATA_TOPIC_NAME).getOrElse(config.groupCoordinatorConfig.offsetsTopicPartitions))
+        groupCoordinator.startup(() => zkClient.getTopicPartitionCount(Topic.GROUP_METADATA_TOPIC_NAME).getOrElse(config.groupCoordinatorConfig.offsetsTopicPartitions))
 
         /* create producer ids manager */
         val producerIdManager = if (config.interBrokerProtocolVersion.isAllocateProducerIdsSupported) {

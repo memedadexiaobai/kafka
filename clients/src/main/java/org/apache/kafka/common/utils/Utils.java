@@ -485,6 +485,7 @@ public final class Utils {
 
     /**
      * Generates 32 bit murmur2 hash from byte array
+     * MurmurHash 2 是一种非加密哈希函数，具有良好的分布特性和计算效率，适用于一般散列问题。
      * @param data byte array to hash
      * @return 32 bit hash of the given array
      */
@@ -1491,7 +1492,7 @@ public final class Utils {
     }
 
     /**
-     * Cast a map with arbitrary type keys to be keyed on String.
+     * Cast a map with arbitrary(任意) type keys to be keyed on String.
      * @param inputMap A map with unknown type keys
      * @return A map with the same contents as the input map, but with String keys
      * @throws ConfigException if any key is not a String
