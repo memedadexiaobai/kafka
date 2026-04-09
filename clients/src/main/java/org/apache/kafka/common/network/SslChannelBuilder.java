@@ -63,7 +63,7 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
     public void configure(Map<String, ?> configs) throws KafkaException {
         try {
             this.configs = configs;
-            String sslPrincipalMappingRules = (String) configs.get(BrokerSecurityConfigs.SSL_PRINCIPAL_MAPPING_RULES_CONFIG);
+            String sslPrincipalMappingRules = (String) configs.get(BrokerSecurityConfigs.SSL_PRINCIPAL_MAPPING_RULES_CONFIG);// "ssl.principal.mapping.rules"
             if (sslPrincipalMappingRules != null)
                 sslPrincipalMapper = SslPrincipalMapper.fromRules(sslPrincipalMappingRules);
             this.sslFactory = new SslFactory(connectionMode, null, isInterBrokerListener);

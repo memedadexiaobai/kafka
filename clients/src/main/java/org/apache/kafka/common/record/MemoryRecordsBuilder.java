@@ -66,7 +66,27 @@ public class MemoryRecordsBuilder implements AutoCloseable {
     private final long logAppendTime;
     private final boolean isControlBatch;
     private final int partitionLeaderEpoch;
-    private final int writeLimit;
+    /**
+     * 为什么需要这个限制？
+     *  实现 batch.size 配置
+     *   Producer 配置了 batch.size=16384（默认16KB）
+     *   这个值会作为 writeLimit 传入
+     *   确保单个 batch 不会无限增长
+     *  内存控制
+     *   避免单个 batch 占用过多内存
+     *   保证消息能及时发送，而不是等待太久凑大批次
+     *  网络传输优化
+     *   控制单次请求的大小
+     *   平衡吞吐量和延迟
+     * | 属性 | 说明 |
+     * |------|------|
+     * | **控制对象** | 单个 RecordBatch 的最大字节数 |
+     * | **来源** | Producer 配置的 `batch.size` |
+     * | **作用时机** | 每次 `append` 前检查 `hasRoomFor()` |
+     * | **特殊规则** | 第一条 record 总是允许（即使超限） |
+     * | **超过后果** | `isFull()` 返回 true，触发 batch 发送 |
+     */
+    private final int writeLimit;// 控制一个 RecordBatch 允许写入的最大字节数上限
     private final int batchHeaderSizeInBytes;
     private final long deleteHorizonMs;
 
@@ -474,6 +494,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
             if (magic > RecordBatch.MAGIC_VALUE_V1) {
                 appendDefaultRecord(offset, timestamp, key, value, headers);
             } else {
+                //这个是老版本
                 appendLegacyRecord(offset, timestamp, key, value, magic);
             }
         } catch (IOException e) {
@@ -758,8 +779,8 @@ public class MemoryRecordsBuilder implements AutoCloseable {
     private void appendDefaultRecord(long offset, long timestamp, ByteBuffer key, ByteBuffer value,
                                      Header[] headers) throws IOException {
         ensureOpenForRecordAppend();
-        int offsetDelta = (int) (offset - baseOffset);
-        long timestampDelta = timestamp - baseTimestamp;
+        int offsetDelta = (int) (offset - baseOffset);//相对 baseOffset 的偏移量
+        long timestampDelta = timestamp - baseTimestamp;//相对 baseTimestamp 的偏移量
         int sizeInBytes = DefaultRecord.writeTo(appendStream, offsetDelta, timestampDelta, key, value, headers);
         recordWritten(offset, timestamp, sizeInBytes);
     }
@@ -814,14 +835,43 @@ public class MemoryRecordsBuilder implements AutoCloseable {
     }
 
     /**
-     * Get an estimate of the number of bytes written (based on the estimation factor hard-coded in {@link CompressionType}).
+     * Get an estimate(估计) of the number of bytes written (based on the estimation factor hard-coded in {@link CompressionType}).
      * @return The estimated number of bytes written
      */
     private int estimatedBytesWritten() {
+        /**
+         * batchHeaderSizeInBytes - Batch 头部大小
+         * 这是 RecordBatch 的固定头部，包括：
+         *  BaseOffset (8字节)
+         *  Length (4字节)
+         *  PartitionLeaderEpoch (4字节)
+         *  Magic (1字节)
+         *  CRC (4字节)
+         *  Attributes (2字节)
+         *  LastOffsetDelta (4字节)
+         *  FirstTimestamp (8字节)
+         *  LastTimestamp (8字节)
+         *  ProducerId/Epoch/Sequence 等（如果是事务性生产者）
+         * 总共约 61 字节左右（取决于版本和配置）。
+         */
         if (compression.type() == CompressionType.NONE) {
+            /**
+             * uncompressedRecordsSizeInBytes - 已写入的 Records 总大小
+             *  这是当前已经添加到 batch 中的所有 Record 的实际大小（未压缩状态），包括：
+             *  每个 Record 的长度前缀
+             *  每个 Record 的 timestamp delta
+             *  每个 Record 的 key/value/headers
+             * 这不是固定的，而是随着不断添加 Record 而增长。
+             */
             return batchHeaderSizeInBytes + uncompressedRecordsSizeInBytes;
         } else {
             // estimate the written bytes to the underlying byte buffer based on uncompressed written bytes
+            // estimatedCompressionRatio:压缩比
+            // COMPRESSION_RATE_ESTIMATION_FACTOR：安全系数
+            // 为什么需要这个估算？这个方法的目的是预测当前 batch 的总大小，用于：
+            //  判断是否超过 batch.size 配置
+            //  避免频繁扩容 ByteBuffer:提前知道大概需要多少空间 减少内存重新分配
+            //  压缩场景下的预估:压缩前的数据可能很大 但压缩后会变小 用历史压缩比来估算，避免过于保守或激进
             return batchHeaderSizeInBytes + (int) (uncompressedRecordsSizeInBytes * estimatedCompressionRatio * COMPRESSION_RATE_ESTIMATION_FACTOR);
         }
     }
@@ -863,10 +913,16 @@ public class MemoryRecordsBuilder implements AutoCloseable {
         } else {
             int nextOffsetDelta = lastOffset == null ? 0 : (int) (lastOffset - baseOffset + 1);
             long timestampDelta = baseTimestamp == null ? 0 : timestamp - baseTimestamp;
+            // 采用VarinT编码进行性能优化 计算出整个记录的字节数
             recordSize = DefaultRecord.sizeInBytes(nextOffsetDelta, timestampDelta, key, value, headers);
         }
 
         // Be conservative and not take compression of the new record into consideration.
+        // 含义：判断是否有空间时，不考虑新 record 的压缩效果，按未压缩大小计算。
+        // 原因：
+        //  压缩比是估算的，不准确
+        //  保守策略：宁可提前关闭 batch，也不要超出太多
+        //  已经写入的 records 用估算的压缩比
         return this.writeLimit >= estimatedBytesWritten() + recordSize;
     }
 
@@ -889,6 +945,10 @@ public class MemoryRecordsBuilder implements AutoCloseable {
     public boolean isFull() {
         // note that the write limit is respected only after the first record is added which ensures we can always
         // create non-empty batches (this is used to disable batching when the producer's batch size is set to 0).
+        /**
+         * estimatedBytesWritten() 的作用 估算当前已经写入的字节数，用于判断 batch 是否已满
+         *
+         */
         return appendStream == CLOSED_STREAM || (this.numRecords > 0 && this.writeLimit <= estimatedBytesWritten());
     }
 

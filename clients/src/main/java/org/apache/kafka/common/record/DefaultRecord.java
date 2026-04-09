@@ -501,12 +501,24 @@ public class DefaultRecord implements Record {
                                         int valueSize,
                                         Header[] headers) {
         int size = 1; // always one byte for attributes
-        size += ByteUtils.sizeOfVarint(offsetDelta);
+        size += ByteUtils.sizeOfVarint(offsetDelta);//计算需要多少个字节数来表示offsetDelta，使用Varint编码
         size += ByteUtils.sizeOfVarlong(timestampDelta);
         size += sizeOf(keySize, valueSize, headers);
         return size;
     }
 
+    /**
+     * 通用模式
+     *  总大小 = Varint编码的长度字节数 + 实际数据的字节数
+     * 为什么这样设计？
+     * | 设计要点 | 原因 |
+     * |---------|------|
+     * | **Varint 编码长度** | 小数字用更少字节（大部分消息的 key/value 都不大） |
+     * | **长度前缀** | 反序列化时知道要读多少字节，无需分隔符 |
+     * | **NULL 特殊标记** | 区分"空字符串"和"null"，且节省空间 |
+     *
+     * 这就是典型的 TLV (Type-Length-Value)** 变体格式，在网络协议和序列化中非常常见。
+     */
     private static int sizeOf(int keySize, int valueSize, Header[] headers) {
         int size = 0;
         if (keySize < 0)

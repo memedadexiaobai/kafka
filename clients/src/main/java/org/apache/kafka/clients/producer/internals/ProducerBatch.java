@@ -74,6 +74,28 @@ public final class ProducerBatch {
     private final AtomicReference<FinalState> finalState = new AtomicReference<>(null);
 
     int recordCount;
+    /**
+     * 跟踪的是当前 Batch 中最大的单条 Record 的大小
+     * 为什么需要追踪最大 Record 大小？
+     * 核心用途：判断一个 Batch 是否可以被拆分（split）。
+     * 当 Broker 返回 MESSAGE_TOO_LARGE 错误时，Producer 需要决定：
+     *   能否拆分这个 batch → 拆成多个小 batch 重试
+     *   无法拆分 → 直接抛出 RecordTooLargeException
+     * 判断依据：如果 batch 中只有一条 record，或者所有 records 都很大，拆分没有意义
+     *
+     *  | 字段 | 含义 | 用途 |
+     *  |------|------|------|
+     *  | `recordCount` | Batch 中 Record 的数量 | 判断是否可以拆分（>1） |
+     *  | `maxRecordSize` | 最大单条 Record 的大小 | **评估拆分的可行性** |
+     *  | `estimatedSizeInBytes()` | Batch 总大小 | 判断是否超过 `batch.size` |
+     *
+     * maxRecordSize 的作用：
+     *  ✅ 追踪最大单条 Record 大小
+     *  ✅ 辅助判断 Batch 拆分的可行性
+     *  ✅ 为未来的优化预留数据（如预估拆分后的 batch 数量）
+     *  ⚠️ 当前使用有限：主要在 tryAppend 时更新，但拆分逻辑中还未充分利用
+     * 设计哲学：即使当前不完全需要，也先收集这个指标，为后续优化（如更智能的 batch 拆分策略）提供数据支持。这是典型的前瞻性设计。
+     */
     int maxRecordSize;
     private long lastAttemptMs;
     private long lastAppendTime;
@@ -143,11 +165,12 @@ public final class ProducerBatch {
      */
     public FutureRecordMetadata tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers, Callback callback, long now) {
         if (!recordsBuilder.hasRoomFor(timestamp, key, value, headers)) {
-            return null;
+            return null;//没空间写数据了 直接返回
         } else {
             this.recordsBuilder.append(timestamp, key, value, headers);
-            this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
-                    recordsBuilder.compression().type(), key, value, headers));
+            this.maxRecordSize = Math.max(this.maxRecordSize,
+                    AbstractRecords.estimateSizeInBytesUpperBound(magic(),
+                            recordsBuilder.compression().type(), key, value, headers));
             this.lastAppendTime = now;
             FutureRecordMetadata future = new FutureRecordMetadata(this.produceFuture, this.recordCount,
                                                                    timestamp,

@@ -43,12 +43,25 @@ public class StickyPartitionCache {
         return part;
     }
 
+    /**
+     * 这是一个粘性分区缓存机制，用于 Kafka Producer 的消息分区策略。核心目标是：
+     *   批量发送优化：让同一批次的消息发送到同一个分区，提高压缩率和吞吐量
+     *   负载均衡：在批次切换时，均匀地切换到其他可用分区
+     * 这个方法通过粘性分区 + 懒更新 + CAS 实现了：
+     *  ✅ 批次内消息聚集到同一分区
+     *  ✅ 批次间均匀分布到不同分区
+     *  ✅ 高并发下的线程安全
+     */
     public int nextPartition(String topic, Cluster cluster, int prevPartition) {
         List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
         Integer oldPart = indexCache.get(topic);
         Integer newPart = oldPart;
         // Check that the current sticky partition for the topic is either not set or that the partition that 
         // triggered the new batch matches the sticky partition that needs to be changed.
+        // oldPart == null：该 topic 还没有设置粘性分区
+        // oldPart == prevPartition：当前缓存的分区就是触发新批次的那个分区
+        // 只有这2中情况切换分区
+        // 为什么这样设计？ 如果 prevPartition 和缓存的分区不一致，说明有其他线程已经更新了粘性分区，当前调用应该使用最新的分区值，避免覆盖。
         if (oldPart == null || oldPart == prevPartition) {
             List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
             if (availablePartitions.isEmpty()) {
@@ -66,6 +79,7 @@ public class StickyPartitionCache {
             if (oldPart == null) {
                 indexCache.putIfAbsent(topic, newPart);
             } else {
+                // CAS 操作，只有当当前值仍为 prevPartition 时才替换成功，防止并发冲突
                 indexCache.replace(topic, prevPartition, newPart);
             }
             return indexCache.get(topic);

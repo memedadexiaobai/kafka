@@ -54,8 +54,8 @@ public final class ClientUtils {
     }
 
     public static List<InetSocketAddress> parseAndValidateAddresses(AbstractConfig config) {
-        List<String> urls = config.getList(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
-        String clientDnsLookupConfig = config.getString(CommonClientConfigs.CLIENT_DNS_LOOKUP_CONFIG);
+        List<String> urls = config.getList(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);// bootstrap.servers
+        String clientDnsLookupConfig = config.getString(CommonClientConfigs.CLIENT_DNS_LOOKUP_CONFIG);// client.dns.lookup
         return parseAndValidateAddresses(urls, clientDnsLookupConfig);
     }
 
@@ -73,6 +73,13 @@ public final class ClientUtils {
                     if (host == null || port == null)
                         throw new ConfigException("Invalid url in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG + ": " + url);
 
+                    /**
+                     * 行为：
+                     *  立即解析：启动时就查询所有 DNS 记录
+                     *  获取规范主机名：通过 getCanonicalHostName() 获取 CNAME
+                     *  多 IP 支持：如果一个主机名对应多个 IP，会为每个 IP 创建连接地址
+                     *  使用规范名称：用 CNAME 而不是原始主机名创建连接
+                     */
                     if (clientDnsLookup == ClientDnsLookup.RESOLVE_CANONICAL_BOOTSTRAP_SERVERS_ONLY) {
                         InetAddress[] inetAddresses = InetAddress.getAllByName(host);
                         for (InetAddress inetAddress : inetAddresses) {
@@ -85,6 +92,15 @@ public final class ClientUtils {
                             }
                         }
                     } else {
+                        /**
+                         * 行为：
+                         *  直接使用主机名创建 InetSocketAddress
+                         *  延迟解析：直到真正建立连接时才进行 DNS 解析
+                         *  每个 IP 只创建一个地址
+                         * 适用场景：
+                         *  简单的单 IP 环境
+                         *  希望减少启动时的 DNS 查询开销
+                         */
                         InetSocketAddress address = new InetSocketAddress(host, port);
                         if (address.isUnresolved()) {
                             log.warn("Couldn't resolve server {} from {} as DNS resolution failed for {}", url, CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, host);
@@ -115,8 +131,8 @@ public final class ClientUtils {
      * @return configured ChannelBuilder based on the configs.
      */
     public static ChannelBuilder createChannelBuilder(AbstractConfig config, Time time, LogContext logContext) {
-        SecurityProtocol securityProtocol = SecurityProtocol.forName(config.getString(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
-        String clientSaslMechanism = config.getString(SaslConfigs.SASL_MECHANISM);
+        SecurityProtocol securityProtocol = SecurityProtocol.forName(config.getString(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));// security.protocol
+        String clientSaslMechanism = config.getString(SaslConfigs.SASL_MECHANISM);// sasl.mechanism
         return ChannelBuilders.clientChannelBuilder(securityProtocol, JaasContext.Type.CLIENT, config, null,
                 clientSaslMechanism, time, true, logContext);
     }

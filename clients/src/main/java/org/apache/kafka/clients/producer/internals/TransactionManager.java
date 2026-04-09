@@ -1028,7 +1028,7 @@ public class TransactionManager {
         // but create a new instance without the call trace since it was not thrown because of the current call
         if (lastError instanceof ProducerFencedException) {
             throw new ProducerFencedException("Producer with transactionalId '" + transactionalId
-                    + "' and " + producerIdAndEpoch + " has been fenced by another producer " +
+                    + "' and " + producerIdAndEpoch + " has been fenced(圈定) by another producer " +
                     "with the same transactionalId");
         }
         if (lastError instanceof InvalidProducerEpochException) {

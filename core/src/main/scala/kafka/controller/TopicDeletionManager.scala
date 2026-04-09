@@ -33,8 +33,11 @@ trait DeletionClient {
 
 class ControllerDeletionClient(controller: KafkaController, zkClient: KafkaZkClient) extends DeletionClient {
   override def deleteTopic(topic: String, epochZkVersion: Int): Unit = {
+    //删除 /brokers/topics/$topic 该节点和下边的所有节点
     zkClient.deleteTopicZNode(topic, epochZkVersion)
+    // 删除节点 /config/topics/$topic
     zkClient.deleteTopicConfigs(Seq(topic), epochZkVersion)
+    // 删除节点 /admin/delete_topics/$topic
     zkClient.deleteTopicDeletions(Seq(topic), epochZkVersion)
   }
 
@@ -223,9 +226,10 @@ class TopicDeletionManager(config: KafkaConfig,
   def markTopicIneligibleForDeletion(topics: Set[String], reason: => String): Unit = {
     if (isDeleteTopicEnabled) {
       val newTopicsToHaltDeletion = controllerContext.topicsToBeDeleted & topics
+      // 对于 Set 类型的集合，++= 操作符自动具有去重效果
       controllerContext.topicsIneligibleForDeletion ++= newTopicsToHaltDeletion
       if (newTopicsToHaltDeletion.nonEmpty)
-        info(s"Halted deletion of topics ${newTopicsToHaltDeletion.mkString(",")} due to $reason")
+        info(s"Halted(停止) deletion of topics ${newTopicsToHaltDeletion.mkString(",")} due to $reason")
     }
   }
 
@@ -290,13 +294,19 @@ class TopicDeletionManager(config: KafkaConfig,
   }
 
   private def completeDeleteTopic(topic: String): Unit = {
-    // deregister partition change listener on the deleted topic. This is to prevent the partition change listener
+    // deregister partition change listener on the deleted topic.
+    // This is to prevent the partition change listener
     // firing before the new topic listener when a deleted topic gets auto created
+    // 移除 /brokers/topics/$topic 上的监听器
     client.mutePartitionModifications(topic)
+    // 过滤出已经删除成功的主题
     val replicasForDeletedTopic = controllerContext.replicasInState(topic, ReplicaDeletionSuccessful)
     // controller will remove this replica from the state machine as well as its partition assignment cache
+    // 副本下线
     replicaStateMachine.handleStateChanges(replicasForDeletedTopic.toSeq, NonExistentReplica)
+    //删除 Zookeeper 相关数据
     client.deleteTopic(topic, controllerContext.epochZkVersion)
+    // 清理本地缓存
     controllerContext.removeTopic(topic)
   }
 
@@ -377,14 +387,14 @@ class TopicDeletionManager(config: KafkaConfig,
       info(s"Handling deletion for topics ${topicsQueuedForDeletion.mkString(",")}")
 
     topicsQueuedForDeletion.foreach { topic =>
-      // if all replicas are marked as deleted successfully, then topic deletion is done
+      // if all replicas are marked as deleted successfully, then topic deletion is done 所有副本都被标记删除成功了
       if (controllerContext.areAllReplicasInState(topic, ReplicaDeletionSuccessful)) {
         // clear up all state for this topic from controller cache and zookeeper
         completeDeleteTopic(topic)
         info(s"Deletion of topic $topic successfully completed")
       } else if (!controllerContext.isAnyReplicaInState(topic, ReplicaDeletionStarted)) {
-        // if you come here, then no replica is in TopicDeletionStarted and all replicas are not in
-        // TopicDeletionSuccessful. That means, that either given topic haven't initiated deletion
+        // if you come here, then no replica is in TopicDeletionStarted and all replicas are not in TopicDeletionSuccessful.
+        // That means, that either given topic haven't initiated deletion
         // or there is at least one failed replica (which means topic deletion should be retried).
         if (controllerContext.isAnyReplicaInState(topic, ReplicaDeletionIneligible)) {
           topicsEligibleForRetry += topic

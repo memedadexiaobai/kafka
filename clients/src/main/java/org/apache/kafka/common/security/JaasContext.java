@@ -73,6 +73,50 @@ public class JaasContext {
      * If both are valid entries in the default JAAS configuration, the first option is chosen.
      * </p>
      *
+     * 参数 1：ListenerName listenerName - 监听器名称
+     * 类型： org.apache.kafka.common.network.ListenerName
+     * 作用： 指定 Kafka Server 的监听器标识
+     * // 常见监听器名称
+     * new ListenerName("EXTERNAL")      // 外部访问监听器
+     * new ListenerName("INTERNAL")      // 内部访问监听器
+     * new ListenerName("PLAINTEXT")     // 明文传输监听器
+     * new ListenerName("SSL")           // SSL 加密监听器
+     * new ListenerName("SASL_SSL")      // SASL+SSL 安全监听器
+     * 用途：
+     *  用于构建 JAAS 上下文的名称：{listenerName}.KafkaServer
+     *  支持多监听器场景下，每个监听器使用不同的认证配置
+     *
+     * 参数 2：String mechanism - SASL 认证机制
+     * 类型： String
+     * 作用： 指定使用的 SASL 认证机制名称
+     * "PLAIN"              // 简单用户名密码认证
+     * "SCRAM-SHA-256"      // SCRAM SHA-256 认证
+     * "SCRAM-SHA-512"      // SCRAM SHA-512 认证
+     * "GSSAPI"             // Kerberos 认证
+     * "OAUTHBEARER"        // OAuth Bearer Token 认证
+     * "DIGEST-MD5"         // DIGEST-MD5 认证（已废弃）
+     * 用途：
+     * 用于查找特定机制的 JAAS 配置
+     * 配置 key 格式：{mechanism}.sasl.jaas.config
+     *
+     * 参数 3：Map<String, ?> configs - 配置映射
+     * 类型： Map<String, ?>
+     * 作用： 包含所有相关的配置项
+     * 来源： 通常来自 AbstractConfig 的配置值
+     * {
+     *     // 全局 SASL 配置
+     *     "sasl.jaas.config": "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"user\" password=\"pass\";",
+     *
+     *     // Listener 级别的 SASL 配置（带前缀）
+     *     "listener.name.external.scram-sha-256.sasl.jaas.config": "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"external_user\" password=\"external_pass\";",
+     *     "listener.name.internal.plain.sasl.jaas.config": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"internal_user\" password=\"internal_pass\";",
+     *
+     *     // 其他 SASL 相关配置
+     *     "sasl.mechanism": "SCRAM-SHA-256",
+     *     "security.protocol": "SASL_SSL",
+     *
+     *     // ... 其他配置
+     * }
      * @throws IllegalArgumentException if listenerName or mechanism is not defined.
      */
     public static JaasContext loadServerContext(ListenerName listenerName, String mechanism, Map<String, ?> configs) {

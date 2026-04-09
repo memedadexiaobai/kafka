@@ -227,6 +227,32 @@ public final class Utils {
     /**
      * Get the length for UTF8-encoding a string without encoding it first
      *
+     * UTF-8 是一种变长编码，不同范围的 Unicode 字符占用不同字节数：
+     * | Unicode 码点范围 | UTF-8 字节数 | 二进制格式 |
+     * |-----------------|------------|-----------|
+     * | U+0000 ~ U+007F | 1 字节 | `0xxxxxxx` |
+     * | U+0080 ~ U+07FF | 2 字节 | `110xxxxx 10xxxxxx` |
+     * | U+0800 ~ U+FFFF | 3 字节 | `1110xxxx 10xxxxxx 10xxxxxx` |
+     * | U+10000 ~ U+10FFFF | 4 字节 | `11110xxx 10xxxxxx 10xxxxxx 10xxxxxx` |
+     *
+     *  遍历每个 char
+     *     ↓
+     * ch <= 0x7F? ──── Yes ──→ 1 字节 (ASCII)
+     *     ↓ No
+     * ch <= 0x7FF? ─── Yes ──→ 2 字节 (拉丁/希腊等)
+     *     ↓ No
+     * 是高代理项? ──── Yes ──→ 4 字节 + 跳过下一个 char (Emoji等)
+     *     ↓ No
+     *                ────────→ 3 字节 (中文/日文/韩文等)
+     *
+     * 为什么要手动计算？
+     *  而不是直接用 s.getBytes(UTF_8).length？
+     * 性能原因：
+     *  getBytes() 需要分配新数组 + 实际编码
+     *  这个方法只是快速估算长度，用于预分配缓冲区
+     *  避免了内存分配和完整编码的开销
+     * 这在 Kafka 这种高性能场景中非常重要，特别是在序列化消息时提前知道需要多大的 buffer。
+     *
      * @param s The string to calculate the length for
      * @return The length when serialized
      */
@@ -234,14 +260,47 @@ public final class Utils {
         int count = 0;
         for (int i = 0, len = s.length(); i < len; i++) {
             char ch = s.charAt(i);
-            if (ch <= 0x7F) {
+            /**
+             * 范围：U+0000 ~ U+007F（0-127）
+             * 包括：英文字母、数字、常见符号
+             * 字节数：1 字节
+             * 示例：'A' (65), '0' (48), ' ' (32)
+             */
+            if (ch <= 0x7F) {// 0x7F = 127
                 count++;
-            } else if (ch <= 0x7FF) {
+            }
+            /**
+             * 范围：U+0080 ~ U+07FF（128-2047）
+             * 包括：拉丁扩展字符、希腊字母、西里尔字母、阿拉伯字母等
+             * 字节数：2 字节
+             * 示例：'é' (U+00E9), 'ñ' (U+00F1), 'α' (U+03B1)
+             */
+            else if (ch <= 0x7FF) { // 0x7FF = 2047
                 count += 2;
-            } else if (Character.isHighSurrogate(ch)) {
-                count += 4;
-                ++i;
-            } else {
+            }
+            /**
+             * 代理对（Surrogate Pair）
+             * 判断条件：Character.isHighSurrogate(ch) 检查是否是高代理项
+             * 范围：U+D800 ~ U+DBFF（高代理项）
+             * 含义：这是一个 4 字节字符的前半部分
+             * 为什么需要特殊处理？
+             * Java 的 char 类型是 16 位（UCS-2），只能表示 U+0000 ~ U+FFFF。
+             * 对于 U+10000 以上的字符（如 emoji、罕见汉字），Java 使用两个 char 来表示：
+             *  高代理项（High Surrogate）：U+D800 ~ U+DBFF
+             *  低代理项（Low Surrogate）：U+DC00 ~ U+DFFF
+             * 这两个合起来叫 Surrogate Pair，表示一个完整的 Unicode 字符。
+             */
+            else if (Character.isHighSurrogate(ch)) {
+                count += 4;// 这个字符在 UTF-8 中占 4 字节
+                ++i;//跳过下一个 char（低代理项），避免重复计算
+            }
+            /**
+             * 范围：U+0800 ~ U+FFFF（排除代理对）
+             * 包括：大部分中文、日文、韩文字符
+             * 字节数：3 字节
+             * 示例：'中' (U+4E2D), '日' (U+65E5), '한' (U+D55C)
+             */
+            else {
                 count += 3;
             }
         }
@@ -1206,6 +1265,33 @@ public final class Utils {
      * compatible with the existing messages already placed on a partition since it is used
      * in producer's partition selection logic {@link org.apache.kafka.clients.producer.KafkaProducer}
      *
+     *
+     * 为什么使用 number & 0x7fffffff 而不是 Math.abs(number)？
+     *  核心原因：避免 Integer.MIN_VALUE 的边界问题
+     *  int number = Integer.MIN_VALUE; // -2147483648
+     *  // 方法 1: 使用 Math.abs()
+     *  System.out.println("Math.abs(MIN_VALUE) = " + Math.abs(number));
+     *  // 输出：-2147483648 (仍然是负数！因为溢出)
+     *  // 方法 2: 使用位运算 & 0x7fffffff
+     *  System.out.println("& 0x7fffffff = " + (number & 0x7fffffff));
+     *  // 输出：0 (正数)
+     *  // 再看一个普通负数的例子
+     *  int negativeNumber = -5;
+     *  System.out.println("Math.abs(-5) = " + Math.abs(negativeNumber));           // 5
+     *  System.out.println("-5 & 0x7fffffff = " + (-5 & 0x7fffffff));               // 2147483643
+     *
+     * 原理解析：
+     *  0x7fffffff 的二进制表示：
+     *    0x7fffffff = 01111111 11111111 11111111 11111111
+     *                 ↑
+     *            符号位为 0（正数），其余 31 位都是 1
+     *  位运算的效果：
+     *   与 0x7fffffff 做 AND 运算，会强制将符号位设为 0，保留低 31 位
+     *  这样无论输入是什么，结果一定是非负数（0 到 2³¹-1）
+     *  为什么不用 Math.abs()：
+     *   Math.abs(Integer.MIN_VALUE) 会返回 Integer.MIN_VALUE（仍然是负数）
+     *  因为在补码表示中，-(-2147483648) 应该是 2147483648，但这超出了 int 的最大值 2147483647，导致溢出
+     *
      * @param number a given number
      * @return a positive number.
      */
@@ -1348,9 +1434,61 @@ public final class Utils {
      * @throws IOException For any errors writing to the output
      */
     public static void writeTo(DataOutput out, ByteBuffer buffer, int length) throws IOException {
+        /**
+         * 检查 ByteBuffer 是否有底层 backing array（支持数组访问）
+         * 核心概念：Heap Buffer vs Direct Buffer
+         * Java 的 ByteBuffer 有两种实现：
+         * 1️⃣ Heap ByteBuffer（堆内缓冲区）
+         * ByteBuffer buffer = ByteBuffer.allocate(1024);  // 在 JVM 堆上分配
+         * buffer.hasArray();  // → true ✓
+         * 底层是一个 byte[] 数组
+         * 可以通过 array() 方法直接访问
+         * 速度快，可以直接批量拷贝
+         * 2️⃣ Direct ByteBuffer（直接缓冲区）
+         * ByteBuffer buffer = ByteBuffer.allocateDirect(1024);  // 在堆外内存分配
+         * buffer.hasArray();  // → false ✗
+         * 底层是操作系统级别的内存（native memory）
+         * 不能通过 array() 访问（会抛异常）
+         * 需要逐字节读取或通过 JNI 访问
+         *
+         * | 方法 | 作用 | 示例 |
+         * |------|------|------|
+         * | `hasArray()` | 判断是否有 backing array | Heap: true, Direct: false |
+         * | `array()` | 获取底层 byte[] 数组 | 仅当 hasArray()=true 时可用 |
+         * | `arrayOffset()` | 数组的偏移量 | 通常是 0，但可能是其他值 |
+         * | `position()` | 当前读写位置 | 从哪个位置开始读 |
+         *
+         * 为什么要加 arrayOffset()？
+         * 因为 ByteBuffer 可能是切片（slice）或视图（view）：
+         * byte[] data = new byte[100];
+         * ByteBuffer buffer = ByteBuffer.wrap(data, 10, 50);  // 从第10字节开始，长度50
+         *
+         * buffer.array();       // 返回完整的 data 数组（100字节）
+         * buffer.arrayOffset(); // 返回 10（偏移量）
+         * buffer.position();    // 返回 0（相对位置）
+         *
+         * // 实际要读的绝对位置 = position + arrayOffset = 0 + 10 = 10
+         *
+         * | 操作 | Heap Buffer | Direct Buffer |
+         * |------|-------------|---------------|
+         * | 访问方式 | 直接数组引用 | JNI 调用或逐字节 |
+         * | 批量拷贝 | ✅ `System.arraycopy` | ❌ 需要中间缓冲 |
+         * | GC 压力 | 有（堆内对象） | 无（堆外内存） |
+         * | 适用场景 | 频繁小数据操作 | 大 IO、零拷贝 |
+         *
+         * Kafka 的使用场景
+         * 在 Kafka 中：
+         *   大部分情况使用 Heap Buffer（Producer/Consumer 的消息处理）
+         *   特殊场景使用 Direct Buffer（如零拷贝传输、网络层优化）
+         * 这个判断确保：
+         *  有数组时：走快速路径，直接批量写入
+         *  无数组时：走兼容路径，保证正确性
+         */
         if (buffer.hasArray()) {
+            // 快速路径：直接从底层数组批量拷贝
             out.write(buffer.array(), buffer.position() + buffer.arrayOffset(), length);
         } else {
+            // 慢速路径：需要逐字节读取或使用其他方式
             int pos = buffer.position();
             for (int i = pos; i < length + pos; i++)
                 out.writeByte(buffer.get(i));

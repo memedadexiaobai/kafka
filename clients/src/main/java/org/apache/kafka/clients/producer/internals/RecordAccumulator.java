@@ -138,9 +138,9 @@ public class RecordAccumulator {
         this.compression = compression;
         this.lingerMs = lingerMs;
         this.retryBackoff = new ExponentialBackoff(retryBackoffMs,
-                CommonClientConfigs.RETRY_BACKOFF_EXP_BASE,
+                CommonClientConfigs.RETRY_BACKOFF_EXP_BASE,// 2
                 retryBackoffMaxMs,
-                CommonClientConfigs.RETRY_BACKOFF_JITTER);
+                CommonClientConfigs.RETRY_BACKOFF_JITTER);//0.2
         this.deliveryTimeoutMs = deliveryTimeoutMs;
         this.enableAdaptivePartitioning = partitionerConfig.enableAdaptivePartitioning;
         this.partitionAvailabilityTimeoutMs = partitionerConfig.partitionAvailabilityTimeoutMs;
@@ -251,7 +251,7 @@ public class RecordAccumulator {
 
         // We might have disabled partition switch if the queue had incomplete batches.
         // Check if all batches are full now and switch .
-        if (allBatchesFull(deque)) {
+        if (allBatchesFull(deque)) {//检查队列是不是满了
             topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo, 0, cluster, true);
             if (topicInfo.builtInPartitioner.isPartitionChanged(partitionInfo)) {
                 log.trace("Completed previously disabled switch for topic {} partition {}, retrying",
@@ -321,7 +321,7 @@ public class RecordAccumulator {
                 // Now that we know the effective partition, let the caller know.
                 setPartition(callbacks, effectivePartition);
 
-                // check if we have an in-progress batch
+                // check if we have an in-progress batch 一个分区一个队列
                 Deque<ProducerBatch> dq = topicInfo.batches.computeIfAbsent(effectivePartition, k -> new ArrayDeque<>());
                 synchronized (dq) {
                     // After taking the lock, validate that the partition hasn't changed and retry.
@@ -332,13 +332,21 @@ public class RecordAccumulator {
                     if (appendResult != null) {
                         // If queue has incomplete batches we disable switch (see comments in updatePartitionInfo).
                         boolean enableSwitch = allBatchesFull(dq);
-                        topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo, appendResult.appendedBytes, cluster, enableSwitch);
+                        topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo,
+                                appendResult.appendedBytes, cluster, enableSwitch);
                         return appendResult;
                     }
                 }
 
                 // we don't have an in-progress record batch try to allocate a new batch
-                if (abortOnNewBatch) {
+                //| 特性 | 自定义分区器 | 内置分区器 |
+                //|------|------------|-----------|
+                //| `abortOnNewBatch` | `true` | `false` |
+                //| 是否需要回调 | ✅ 需要 `onNewBatch()` | ❌ 不需要 |
+                //| 执行路径 | 两次 `append()` 调用 | 一次 `append()` 调用 |
+                //| 性能影响 | 轻微开销（多一次方法调用） | 无额外开销 |
+                //| 灵活性 | 高（分区器可动态调整） | 低（固定算法） |
+                if (abortOnNewBatch) {//当需要创建新批次（ProducerBatch）时，是否提前返回，给自定义分区器一个回调通知的机会。
                     // Return a result that will cause another call to append.
                     return new RecordAppendResult(null, false, false, true, 0);
                 }
@@ -450,12 +458,85 @@ public class RecordAccumulator {
             throw new KafkaException("Producer closed while send in progress");
         ProducerBatch last = deque.peekLast();
         if (last != null) {
+            //追加数据之前的字节数
             int initialBytes = last.estimatedSizeInBytes();
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, headers, callback, nowMs);
             if (future == null) {
                 last.closeForRecordAppends();
             } else {
+                //现在的字节数 - 追加数据之前的字节数 = 增加了多少字节
                 int appendedBytes = last.estimatedSizeInBytes() - initialBytes;
+                /**
+                 * batchIsFull 的含义：告诉调用者"当前分区是否有可以立即发送的 batch"。
+                 * 为什么是 deque.size() > 1 || last.isFull()？
+                 *  这个条件表示：存在至少一个可以发送的 batch
+                 * 情况1：deque.size() > 1
+                 * 含义：队列中有 2 个或更多 batches。
+                 * 推理：
+                 *   Deque 的结构：[batch1, batch2, ..., lastBatch]
+                 *   lastBatch 是当前正在追加的 batch（可能还没满）
+                 *   如果 size() > 1，说明除了 lastBatch，前面还有至少一个 batch
+                 * 为什么前面的 batch 可以发送？
+                 * 因为 Kafka Producer 的发送规则：
+                 *   只有最后一个 batch 可以追加新 record
+                 *   前面的 batches 已经"关闭"了（不能再追加），等待发送
+                 * Deque: [Batch1 (已满), Batch2 (已满), Batch3 (正在追加)]
+                 *        ↑_______↑        ↑_______↑        ↑______________↑
+                 *        可以立即发送      可以立即发送      还在收集数据
+                 *
+                 * deque.size() = 3 > 1 → batchIsFull = true ✓
+                 *
+                 * → Sender 线程会立即发送 Batch1 和 Batch2
+                 *
+                 * 情况2：last.isFull()
+                 * 含义：即使是唯一的 batch，但它已经满了（达到 batch.size 限制）
+                 * Deque: [Batch1 (已满，16KB)]
+                 *        ↑_______________↑
+                 *        唯一的batch，但已满
+                 *
+                 * deque.size() = 1 (不满足 > 1)
+                 * last.isFull() = true ✓
+                 *
+                 * → batchIsFull = true
+                 * → Sender 线程会立即发送 Batch1
+                 * 情况3：都不满足
+                 * Deque: [Batch1 (半满，8KB)]
+                 *        ↑_________________↑
+                 *        唯一的batch，且未满
+                 *
+                 * deque.size() = 1 (不满足 > 1) ❌
+                 * last.isFull() = false ❌
+                 *
+                 * → batchIsFull = false
+                 * → Sender 线程不会立即发送，继续等待：
+                 *   - linger.ms 超时
+                 *   - 或者 batch 变满
+                 *   - 或者 buffer pool 耗尽
+                 *
+                 * 添加一条 Record 到 Batch
+                 *
+                 *     ↓
+                 * 成功追加？
+                 *     ├─ No → 关闭当前 batch，创建新 batch
+                 *     └─ Yes ↓
+                 *            计算 batchIsFull:
+                 *
+                 *            deque.size() > 1?
+                 *            ├─ Yes → batchIsFull = true ✓
+                 *            │         (前面有已关闭的 batches，可以立即发送)
+                 *            └─ No ↓
+                 *                  last.isFull()?
+                 *                  ├─ Yes → batchIsFull = true ✓
+                 *                  │         (当前 batch 已满，可以立即发送)
+                 *                  └─ No → batchIsFull = false
+                 *                           (需要等待 linger.ms 或更多数据)
+                 *
+                 * 核心思想：这是一个启发式信号，告诉上层"现在有数据可以发送了，不用等 linger.ms"。这样可以：
+                 *  ✅ 提高吞吐量：批量发送多个 batches
+                 *  ✅ 降低延迟：满 batch 立即发送，不等超时
+                 *  ✅ 平衡效率：半满 batch 等待凑批，避免频繁小请求
+                 * 这是 Kafka Producer 批量发送策略的关键决策点！
+                 */
                 return new RecordAppendResult(future, deque.size() > 1 || last.isFull(), false, false, appendedBytes);
             }
         }

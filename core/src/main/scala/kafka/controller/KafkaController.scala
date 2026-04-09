@@ -884,7 +884,7 @@ class KafkaController(val config: KafkaConfig,
    *这就是 Kafka 分区重新分配的完整流程！核心思想是：先加后减，确保安全 🎯
    */
   private def onPartitionReassignment(topicPartition: TopicPartition, reassignment: ReplicaAssignment): Unit = {
-    // While a reassignment is in progress, deletion is not allowed
+    // While a reassignment is in progress, deletion is not allowed 标识这个主题暂停删除流程
     topicDeletionManager.markTopicIneligibleForDeletion(Set(topicPartition.topic), reason = "topic reassignment in progress")
 
     updateCurrentReassignment(topicPartition, reassignment)
@@ -1057,7 +1057,7 @@ class KafkaController(val config: KafkaConfig,
 
   private def initializeControllerContext(): Unit = {
     // update controller cache with delete topic information
-    // 1.查询/brokers/ids下的所有子节点 2./brokers/ids/$id查询每个子节点的数据
+    // 1.查询 /brokers/ids 下的所有子节点 2./brokers/ids/$id 查询每个子节点的数据
     val curBrokerAndEpochs = zkClient.getAllBrokerAndEpochsInCluster
     val (compatibleBrokerAndEpochs, incompatibleBrokerAndEpochs) = partitionOnFeatureCompatibility(curBrokerAndEpochs)
     if (incompatibleBrokerAndEpochs.nonEmpty) {
@@ -1067,10 +1067,10 @@ class KafkaController(val config: KafkaConfig,
     // 兼容所有功能特性才能是 liveBroker
     controllerContext.setLiveBrokers(compatibleBrokerAndEpochs)
     info(s"Initialized broker epochs cache: ${controllerContext.liveBrokerIdAndEpochs}")
-    // /brokers/topics下的所有节点
+    // /brokers/topics 下的所有节点
     controllerContext.setAllTopics(zkClient.getAllTopicsInCluster(true))
     registerPartitionModificationsHandlers(controllerContext.allTopics.toSeq)
-    // /brokers/topics/$topic
+    // /brokers/topics/$topic 获取数据
     val replicaAssignmentAndTopicIds = zkClient.getReplicaAssignmentAndTopicIdForTopics(controllerContext.allTopics.toSet)
     // 在kraft模式或者版本大于IBP_2_8_IV0保证topic都有topicId
     processTopicIds(replicaAssignmentAndTopicIds)
@@ -1273,6 +1273,7 @@ class KafkaController(val config: KafkaConfig,
       controllerContext.partitionFullReplicaAssignmentForTopic(topicPartition.topic) +=
       (topicPartition -> assignment)
 
+    // /brokers/topics/$topic 写数据到这个节点
     val setDataResponse = zkClient.setTopicAssignmentRaw(topicPartition.topic,
       controllerContext.topicIds.get(topicPartition.topic),
       topicAssignment, controllerContext.epochZkVersion)
@@ -1414,6 +1415,13 @@ class KafkaController(val config: KafkaConfig,
 
   /**
    * Remove partitions from an active zk-based reassignment (if one exists).
+   * 用于从 ZooKeeper 中的分区重分配列表中移除已完成的分区。
+   *
+   * 这个判断的核心目的是：
+   *   资源管理：完成后及时清理 ZK 临时节点
+   *   状态同步：确保 ZK 中的数据与实际重分配状态一致
+   *   持续监控：通过重新注册监听器，保证系统能响应后续的重分配请求
+   * 这是 Kafka Controller 管理分区重分配生命周期的关键机制：创建 → 监控 → 更新 → 清理。
    *
    * @param shouldRemoveReassignment Predicate indicating which partition reassignments should be removed
    */
@@ -1429,12 +1437,14 @@ class KafkaController(val config: KafkaConfig,
 
     // write the new list to zookeeper
     if (updatedPartitionsBeingReassigned.isEmpty) {
+      // 所有分区都已完成重分配
       info(s"No more partitions need to be reassigned. Deleting zk path ${ReassignPartitionsZNode.path}")
       zkClient.deletePartitionReassignment(controllerContext.epochZkVersion)
       // Ensure we detect future reassignments
       eventManager.put(ZkPartitionReassignment)
     } else {
       try {
+        // 情况 2: 还有分区需要继续重分配
         zkClient.setOrCreatePartitionReassignment(updatedPartitionsBeingReassigned, controllerContext.epochZkVersion)
       } catch {
         case e: KeeperException => throw new AdminOperationException(e)
@@ -1795,6 +1805,7 @@ class KafkaController(val config: KafkaConfig,
     }
 
     try {
+      //到这说明本节点成 Controller 了
       val (epoch, epochZkVersion) = zkClient.registerControllerAndIncrementControllerEpoch(config.brokerId)
       controllerContext.epoch = epoch
       controllerContext.epochZkVersion = epochZkVersion
@@ -2058,12 +2069,12 @@ class KafkaController(val config: KafkaConfig,
 
   private def processZkPartitionReassignment(): Set[TopicPartition] = {
     // We need to register the watcher if the path doesn't exist in order to detect future
-    // reassignments and we get the `path exists` check for free
+    // reassignments and we get the `path exists` check for free 是否存在 /admin/reassign_partitions
     if (isActive && zkClient.registerZNodeChangeHandlerAndCheckExistence(partitionReassignmentHandler)) {
       val reassignmentResults = mutable.Map.empty[TopicPartition, ApiError]
       val partitionsToReassign = mutable.Map.empty[TopicPartition, ReplicaAssignment]
 
-      // /admin/reassign_partitions
+      // /admin/reassign_partitions 这个节点有值代表有分区重分配未完成
       zkClient.getPartitionReassignment.forKeyValue { (tp, targetReplicas) =>
         maybeBuildReassignment(tp, Some(targetReplicas)) match {
           case Some(context) => partitionsToReassign.put(tp, context)
@@ -2147,6 +2158,65 @@ class KafkaController(val config: KafkaConfig,
     }
   }
 
+  /**
+   * 构建分区重分配的结果。它的核心逻辑是根据分区当前是否正在进行重分配，来决定如何计算新的重分配状态。
+   * // 场景 1: 分区正在重分配中 (isBeingReassigned = true)
+   * // 初始状态：replicas = [1, 2, 3]
+   * val assignment1 = ReplicaAssignment(Seq(1, 2, 3))
+   *
+   * // 第一次重分配到 [4, 5, 6]
+   * val reassigning = assignment1.reassignTo(Seq(4, 5, 6))
+   * // 结果：
+   * // replicas = [4, 5, 6, 1, 2, 3]  (目标 + 原始)
+   * // addingReplicas = [4, 5, 6]     (正在添加的)
+   * // removingReplicas = [1, 2, 3]   (正在移除的)
+   * // originReplicas = [1, 2, 3]     (原始副本 = replicas - addingReplicas)
+   * // targetReplicas = [4, 5, 6]     (目标副本 = replicas - removingReplicas)
+   * // isBeingReassigned = true       (因为 adding/removing 不为空)
+   *
+   * // 如果在重分配过程中，再次调用 reassignTo([7, 8, 9])
+   * // 此时代码走 if 分支：targetReplicasOpt.getOrElse(replicaAssignment.originReplicas)
+   * // 如果没提供新的 targetReplicas，就使用 originReplicas [1, 2, 3]
+   * // 这表示"回滚"到原始状态
+   *
+   *
+   * // 场景 2: 分区未进行重分配 (isBeingReassigned = false)
+   * // 初始状态：replicas = [1, 2, 3], addingReplicas = [], removingReplicas = []
+   * val normal = ReplicaAssignment(Seq(1, 2, 3))
+   *
+   * // 重分配到 [4, 5, 6]
+   * val newReassign = normal.reassignTo(Seq(4, 5, 6))
+   * // 结果：
+   * // replicas = [4, 5, 6, 1, 2, 3]
+   * // addingReplicas = [4, 5, 6]
+   * // removingReplicas = [1, 2, 3]
+   * // isBeingReassigned = true
+   *
+   * 判断的核心原因
+   *  1. 处理重分配中断/修改的场景
+   *   当分区已经在重分配过程中 (isBeingReassigned = true)
+   *   如果需要修改重分配计划，可以基于原始副本(originReplicas) 重新计算
+   *   这提供了回滚或调整重分配的能力
+   * 2. 保证幂等性
+   *
+   * | 场景 | `isBeingReassigned` | 行为 | 目的 |
+   * |------|---------------------|------|------|
+   * | 正在重分配 | `true` | 使用 `originReplicas` 作为默认目标 | 支持回滚到原始状态 |
+   * | 未重分配 | `false` | 必须提供 `targetReplicasOpt` | 正常发起新的重分配 |
+   *
+   * 初始状态：[Broker1, Broker2, Broker3]
+   *         ↓ (用户发起重分配到 [Broker4, Broker5, Broker6])
+   * 重分配中：replicas = [4, 5, 6, 1, 2, 3]
+   *         addingReplicas = [4, 5, 6]  ← 新副本正在同步数据
+   *         removingReplicas = [1, 2, 3] ← 旧副本等待被移除
+   *         isBeingReassigned = true
+   *         ↓
+   * 如果此时想修改重分配计划：
+   *   - 不提供新目标 → 回滚到 [1, 2, 3]
+   *   - 提供新目标 [7, 8, 9] → 重新计算重分配状态
+   *
+   * @return 返回分区重分配的结果
+   */
   private def maybeBuildReassignment(topicPartition: TopicPartition,
                                      targetReplicasOpt: Option[Seq[Int]]): Option[ReplicaAssignment] = {
     // 读取本地维护的缓存

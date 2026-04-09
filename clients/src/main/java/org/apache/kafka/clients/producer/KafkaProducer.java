@@ -354,8 +354,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.producerConfig = config;
             this.time = time;
 
+            // transactional.id
             String transactionalId = config.getString(ProducerConfig.TRANSACTIONAL_ID_CONFIG);
-
+            // client.id
             this.clientId = config.getString(ProducerConfig.CLIENT_ID_CONFIG);
 
             LogContext logContext;
@@ -380,23 +381,23 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.producerMetrics = new KafkaProducerMetrics(metrics);
 
             this.partitioner = config.getConfiguredInstance(
-                    ProducerConfig.PARTITIONER_CLASS_CONFIG,
+                    ProducerConfig.PARTITIONER_CLASS_CONFIG,// partitioner.class
                     Partitioner.class,
                     Collections.singletonMap(ProducerConfig.CLIENT_ID_CONFIG, clientId));
             warnIfPartitionerDeprecated();
-            this.partitionerIgnoreKeys = config.getBoolean(ProducerConfig.PARTITIONER_IGNORE_KEYS_CONFIG);
-            long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
-            long retryBackoffMaxMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MAX_MS_CONFIG);
+            this.partitionerIgnoreKeys = config.getBoolean(ProducerConfig.PARTITIONER_IGNORE_KEYS_CONFIG);// partitioner.ignore.keys
+            long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);//retry.backoff.ms
+            long retryBackoffMaxMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MAX_MS_CONFIG);// retry.backoff.max.ms
             if (keySerializer == null) {
-                this.keySerializer = config.getConfiguredInstance(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+                this.keySerializer = config.getConfiguredInstance(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,// key.serializer
                                                                                          Serializer.class);
                 this.keySerializer.configure(config.originals(Collections.singletonMap(ProducerConfig.CLIENT_ID_CONFIG, clientId)), true);
             } else {
-                config.ignore(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
+                config.ignore(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);// key.serializer
                 this.keySerializer = keySerializer;
             }
             if (valueSerializer == null) {
-                this.valueSerializer = config.getConfiguredInstance(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+                this.valueSerializer = config.getConfiguredInstance(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,// value.serializer
                                                                                            Serializer.class);
                 this.valueSerializer.configure(config.originals(Collections.singletonMap(ProducerConfig.CLIENT_ID_CONFIG, clientId)), false);
             } else {
@@ -405,7 +406,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             }
 
             List<ProducerInterceptor<K, V>> interceptorList = ClientUtils.configuredInterceptors(config,
-                    ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
+                    ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,// interceptor.classes
                     ProducerInterceptor.class);
             if (interceptors != null)
                 this.interceptors = interceptors;
@@ -416,26 +417,26 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     interceptorList,
                     reporters,
                     Arrays.asList(this.keySerializer, this.valueSerializer));
-            this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
-            this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
+            this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);// max.request.size
+            this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);// buffer.memory
             this.compression = configureCompression(config);
 
-            this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
+            this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);// max.block.ms
             int deliveryTimeoutMs = configureDeliveryTimeout(config, log);// delivery:交付
 
             this.apiVersions = new ApiVersions();
             this.transactionManager = configureTransactionState(config, logContext);
             // There is no need to do work required for adaptive partitioning, if we use a custom partitioner.
             boolean enableAdaptivePartitioning = partitioner == null &&
-                config.getBoolean(ProducerConfig.PARTITIONER_ADPATIVE_PARTITIONING_ENABLE_CONFIG);
+                config.getBoolean(ProducerConfig.PARTITIONER_ADPATIVE_PARTITIONING_ENABLE_CONFIG);// partitioner.adaptive.partitioning.enable
 
             RecordAccumulator.PartitionerConfig partitionerConfig = new RecordAccumulator.PartitionerConfig(
                 enableAdaptivePartitioning,
-                config.getLong(ProducerConfig.PARTITIONER_AVAILABILITY_TIMEOUT_MS_CONFIG)
+                config.getLong(ProducerConfig.PARTITIONER_AVAILABILITY_TIMEOUT_MS_CONFIG)// partitioner.availability.timeout.ms
             );
             // As per Kafka producer configuration documentation batch.size may be set to 0 to explicitly disable
             // batching which in practice actually means using a batch size of 1.
-            int batchSize = Math.max(1, config.getInt(ProducerConfig.BATCH_SIZE_CONFIG));
+            int batchSize = Math.max(1, config.getInt(ProducerConfig.BATCH_SIZE_CONFIG));// batch.size
 
             this.accumulator = new RecordAccumulator(logContext,
                     batchSize,
@@ -458,8 +459,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             } else {
                 this.metadata = new ProducerMetadata(retryBackoffMs,
                         retryBackoffMaxMs,
-                        config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG),
-                        config.getLong(ProducerConfig.METADATA_MAX_IDLE_CONFIG),
+                        config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG),// metadata.max.age
+                        config.getLong(ProducerConfig.METADATA_MAX_IDLE_CONFIG),// metadata.max.idle
                         logContext,
                         clusterResourceListeners,
                         Time.SYSTEM);
@@ -525,8 +526,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     // visible for testing
     Sender newSender(LogContext logContext, KafkaClient kafkaClient, ProducerMetadata metadata) {
-        int maxInflightRequests = producerConfig.getInt(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION);
-        int requestTimeoutMs = producerConfig.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+        int maxInflightRequests = producerConfig.getInt(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION);// max.in.flight.requests.per.connection
+        int requestTimeoutMs = producerConfig.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);// request.timeout.ms
 
         ProducerMetrics metricsRegistry = new ProducerMetrics(this.metrics);
         Sensor throttleTimeSensor = Sender.throttleTimeSensor(metricsRegistry.senderMetrics);
@@ -560,21 +561,21 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     }
 
     private static Compression configureCompression(ProducerConfig config) {
-        CompressionType type = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
+        CompressionType type = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));// compression.type
         switch (type) {
             case GZIP: {
                 return Compression.gzip()
-                        .level(config.getInt(ProducerConfig.COMPRESSION_GZIP_LEVEL_CONFIG))
+                        .level(config.getInt(ProducerConfig.COMPRESSION_GZIP_LEVEL_CONFIG)) // compression.gzip.level
                         .build();
             }
             case LZ4: {
                 return Compression.lz4()
-                        .level(config.getInt(ProducerConfig.COMPRESSION_LZ4_LEVEL_CONFIG))
+                        .level(config.getInt(ProducerConfig.COMPRESSION_LZ4_LEVEL_CONFIG))// compression.lz4.level
                         .build();
             }
             case ZSTD: {
                 return Compression.zstd()
-                        .level(config.getInt(ProducerConfig.COMPRESSION_ZSTD_LEVEL_CONFIG))
+                        .level(config.getInt(ProducerConfig.COMPRESSION_ZSTD_LEVEL_CONFIG))// compression.zstd.level
                         .build();
             }
             default:
@@ -583,13 +584,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     }
 
     private static int lingerMs(ProducerConfig config) {
+        // linger.ms
         return (int) Math.min(config.getLong(ProducerConfig.LINGER_MS_CONFIG), Integer.MAX_VALUE);
     }
 
     private static int configureDeliveryTimeout(ProducerConfig config, Logger log) {
-        int deliveryTimeoutMs = config.getInt(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG);
+        int deliveryTimeoutMs = config.getInt(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG);// delivery.timeout.ms
         int lingerMs = lingerMs(config);
-        int requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+        int requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);// request.timeout.ms
         int lingerAndRequestTimeoutMs = (int) Math.min((long) lingerMs + requestTimeoutMs, Integer.MAX_VALUE);
 
         if (deliveryTimeoutMs < lingerAndRequestTimeoutMs) {
@@ -613,10 +615,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                                                          LogContext logContext) {
         TransactionManager transactionManager = null;
 
-        if (config.getBoolean(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG)) {//幂等性配置
-            final String transactionalId = config.getString(ProducerConfig.TRANSACTIONAL_ID_CONFIG);
-            final int transactionTimeoutMs = config.getInt(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);
-            final long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
+        if (config.getBoolean(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG)) {//幂等性配置 enable.idempotence
+            final String transactionalId = config.getString(ProducerConfig.TRANSACTIONAL_ID_CONFIG);// transactional.id
+            final int transactionTimeoutMs = config.getInt(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);// transaction.timeout.ms
+            final long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);//  retry.backoff.ms
             transactionManager = new TransactionManager(
                 logContext,
                 transactionalId,
@@ -631,7 +633,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 log.info("Instantiated an idempotent producer.");
         } else {
             // ignore unretrieved configurations related to producer transaction
-            config.ignore(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);
+            config.ignore(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);// transaction.timeout.ms
         }
         return transactionManager;
     }

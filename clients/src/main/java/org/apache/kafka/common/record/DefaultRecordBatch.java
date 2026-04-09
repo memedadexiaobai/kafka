@@ -101,32 +101,148 @@ import static org.apache.kafka.common.record.Records.LOG_OVERHEAD;
 public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRecordBatch {
     static final int BASE_OFFSET_OFFSET = 0;
     static final int BASE_OFFSET_LENGTH = 8;
-    static final int LENGTH_OFFSET = BASE_OFFSET_OFFSET + BASE_OFFSET_LENGTH;
+    static final int LENGTH_OFFSET = BASE_OFFSET_OFFSET + BASE_OFFSET_LENGTH;// 0+8=8
     static final int LENGTH_LENGTH = 4;
-    static final int PARTITION_LEADER_EPOCH_OFFSET = LENGTH_OFFSET + LENGTH_LENGTH;
+    static final int PARTITION_LEADER_EPOCH_OFFSET = LENGTH_OFFSET + LENGTH_LENGTH;// 8+4=12
     static final int PARTITION_LEADER_EPOCH_LENGTH = 4;
-    static final int MAGIC_OFFSET = PARTITION_LEADER_EPOCH_OFFSET + PARTITION_LEADER_EPOCH_LENGTH;
+    static final int MAGIC_OFFSET = PARTITION_LEADER_EPOCH_OFFSET + PARTITION_LEADER_EPOCH_LENGTH;// 12+4=16
     static final int MAGIC_LENGTH = 1;
-    public static final int CRC_OFFSET = MAGIC_OFFSET + MAGIC_LENGTH;
+    public static final int CRC_OFFSET = MAGIC_OFFSET + MAGIC_LENGTH;// 16+1=17
     static final int CRC_LENGTH = 4;
-    static final int ATTRIBUTES_OFFSET = CRC_OFFSET + CRC_LENGTH;
+    static final int ATTRIBUTES_OFFSET = CRC_OFFSET + CRC_LENGTH;// 17+4=21
     static final int ATTRIBUTE_LENGTH = 2;
-    public static final int LAST_OFFSET_DELTA_OFFSET = ATTRIBUTES_OFFSET + ATTRIBUTE_LENGTH;
+    public static final int LAST_OFFSET_DELTA_OFFSET = ATTRIBUTES_OFFSET + ATTRIBUTE_LENGTH;// 21+2=23
     static final int LAST_OFFSET_DELTA_LENGTH = 4;
-    static final int BASE_TIMESTAMP_OFFSET = LAST_OFFSET_DELTA_OFFSET + LAST_OFFSET_DELTA_LENGTH;
+    static final int BASE_TIMESTAMP_OFFSET = LAST_OFFSET_DELTA_OFFSET + LAST_OFFSET_DELTA_LENGTH;// 23+8=31
     static final int BASE_TIMESTAMP_LENGTH = 8;
-    static final int MAX_TIMESTAMP_OFFSET = BASE_TIMESTAMP_OFFSET + BASE_TIMESTAMP_LENGTH;
+    static final int MAX_TIMESTAMP_OFFSET = BASE_TIMESTAMP_OFFSET + BASE_TIMESTAMP_LENGTH;// 31+8=39
     static final int MAX_TIMESTAMP_LENGTH = 8;
-    static final int PRODUCER_ID_OFFSET = MAX_TIMESTAMP_OFFSET + MAX_TIMESTAMP_LENGTH;
+    static final int PRODUCER_ID_OFFSET = MAX_TIMESTAMP_OFFSET + MAX_TIMESTAMP_LENGTH;// 39+8=47
     static final int PRODUCER_ID_LENGTH = 8;
-    static final int PRODUCER_EPOCH_OFFSET = PRODUCER_ID_OFFSET + PRODUCER_ID_LENGTH;
+    static final int PRODUCER_EPOCH_OFFSET = PRODUCER_ID_OFFSET + PRODUCER_ID_LENGTH;// 47+8=55
     static final int PRODUCER_EPOCH_LENGTH = 2;
-    static final int BASE_SEQUENCE_OFFSET = PRODUCER_EPOCH_OFFSET + PRODUCER_EPOCH_LENGTH;
+    static final int BASE_SEQUENCE_OFFSET = PRODUCER_EPOCH_OFFSET + PRODUCER_EPOCH_LENGTH;// 55+4=59
     static final int BASE_SEQUENCE_LENGTH = 4;
-    public static final int RECORDS_COUNT_OFFSET = BASE_SEQUENCE_OFFSET + BASE_SEQUENCE_LENGTH;
+    public static final int RECORDS_COUNT_OFFSET = BASE_SEQUENCE_OFFSET + BASE_SEQUENCE_LENGTH;// 59+4=63
     static final int RECORDS_COUNT_LENGTH = 4;
-    static final int RECORDS_OFFSET = RECORDS_COUNT_OFFSET + RECORDS_COUNT_LENGTH;
+    static final int RECORDS_OFFSET = RECORDS_COUNT_OFFSET + RECORDS_COUNT_LENGTH;// 63+4=67
     public static final int RECORD_BATCH_OVERHEAD = RECORDS_OFFSET;
+
+    /**
+     * RecordBatch 头部结构（67 字节）
+     * Offset:  0        8       12      16 17      21    23       31       39       47    55    59    63    67
+     *          ├────────┼───────┼───────┼──┼───────┼────┼────────┼────────┼────────┼────────┼──────┼─────┼─────┤
+     * Field:   │Base    │Length │Leader │Ma│CRC    │Attr│Last    │Base    │Max     │Producer│Prod  │Base │Rec  │
+     *          │Offset  │       │Epoch  │gi│       ││OffsetDelta│Timestamp│Timestamp│Id     │Epoch │Seq  │Count│
+     *          │        │       │       │c │       │    │        │        │        │        │      │     │     │
+     * Size:    │ 8 bytes│4 bytes│4 bytes│1B│4 bytes│2 B │4 bytes │8 bytes │8 bytes │8 bytes │2 B   │4 B  │4 B  │
+     *          └────────┴───────┴───────┴──┴───────┴────┴────────┴────────┴────────┴────────┴──────┴─────┴─────┘
+     *                                                                                               ↑
+     *                                                                                          Records 开始位置
+     *                                                                                          (RECORDS_OFFSET = 67)
+     * | 偏移量 | 字段名 | 长度 | 说明 |
+     * |--------|--------|------|------|
+     * | **0** | `baseOffset` | 8 字节 | 批次中第一条消息的 offset |
+     * | **8** | `length` | 4 字节 | 整个 batch 的长度（不包括 baseOffset 和 length 本身） |
+     * | **12** | `partitionLeaderEpoch` | 4 字节 | 分区 leader 的 epoch（用于 leader 选举检测） |
+     * | **16** | `magic` | 1 字节 | 消息格式版本（V2 = 2） |
+     * | **17** | `crc` | 4 字节 | CRC32C 校验码（覆盖 magic 之后的所有数据） |
+     * | **21** | `attributes` | 2 字节 | 标志位（压缩类型、时间戳类型、事务控制等） |
+     * | **23** | `lastOffsetDelta` | 4 字节 | 最后一条消息的 offset 与 baseOffset 的差值 |
+     * | **31** | `baseTimestamp` | 8 字节 | 基准时间戳 |
+     * | **39** | `maxTimestamp` | 8 字节 | 批次中最大的时间戳 |
+     * | **47** | `producerId` | 8 字节 | 生产者 ID（幂等性和事务） |
+     * | **55** | `producerEpoch` | 2 字节 | 生产者 epoch（防止旧生产者重试） |
+     * | **59** | `baseSequence` | 4 字节 | 第一条消息的序列号（幂等性） |
+     * | **63** | `recordsCount` | 4 字节 | 批次中 Record 的数量 |
+     * | **67** | **Records** | 变长 | **实际的消息数据开始位置** |
+     *
+     * 可视化结构（带示例值）
+     * Byte Offset:  0                8          12         16  17       21   23
+     *               ┌────────────────┬──────────┬──────────┬───┬────────┬────┬──────────┐
+     *               │  Base Offset   │  Length  │ Leader   │Mag│  CRC   │Attr│ LastOff  │
+     *               │  0x00000000000 │  0x0000  │  Epoch   │ic │0x12345 │ibut│  Delta   │
+     *               │  00000100      │  00A8    │  00000005│ 2 │  5678  │es  │ 0x000000 │
+     *               │  (100)         │  (168)   │          │   │        │0x03│   0A     │
+     *               └────────────────┴──────────┴──────────┴───┴────────┴────┴──────────┘
+     *                8 bytes          4 bytes    4 bytes   1B  4 bytes  2 B   4 bytes
+     *
+     * Byte Offset:  31              39              47              55    59    63    67
+     *               ┌───────────────┬───────────────┬───────────────┬──────┬─────┬─────┬─────
+     *               │ Base Timestamp│ Max Timestamp │  Producer ID  │ Prod │Base │ Rec │Rec
+     *               │               │               │               │Epoch │Seq  │Count│ords
+     *               │0x0000018F3A...│0x0000018F3B...│0x000000000000 │ 0x00 │0x000│ 0x0 │ ...
+     *               │  1234567890   │  1234567900   │  0001         │ 00   │ 0064│  0A │Data
+     *               └───────────────┴───────────────┴───────────────┴──────┴─────┴─────┴─────
+     *                8 bytes         8 bytes         8 bytes         2 B   4 B  4 B  变长
+     *                                                                               ↑
+     *                                                                            Records 数组
+     * Attributes 字段详解（2 字节）
+     * Bit:  15 14 13 12 11 10 9  8  7  6  5  4  3  2  1  0
+     *       ───────────────────────────────────────────────
+     *       ?  ?  ?  ?  ?  ?  ?  ?  ?  ?  ?  ?  T  C  C  C
+     *                                           ^  ^  ^  ^
+     *                                           |  └───── 压缩编解码器 (0-7)
+     *                                           |     0=none, 1=gzip, 2=snappy, 3=lz4, 4=zstd
+     *                                           └──────── 时间戳类型
+     *                                                 0=CreateTime, 1=LogAppendTime
+     *
+     * 其他保留位：
+     * - Bit 4: 事务控制 (isTransactional)
+     * - Bit 5: 控制批次 (isControlBatch)
+     * - Bit 6-15: 保留
+     * Records 部分结构
+     * 从 offset 67 开始，是多个 Record 的序列：
+     * Records Offset (67):
+     * ┌──────────────────────────────────────────────────┐
+     * │  Record 0                                        │
+     * │  ┌──────────┬────────────┬───────┬───────┬──────┐│
+     * │  │ Length   │ Attributes │TS Del │Key Len│Value ││
+     * │  │ (Varint) │ (Varint)   │(Varint)│(Varint)│Len  ││
+     * │  └──────────┴────────────┴───────┴───────┴──────┘│
+     * ├──────────────────────────────────────────────────┤
+     * │  Record 1                                        │
+     * │  ┌──────────┬────────────┬───────┬───────┬──────┐│
+     * │  │ Length   │ Attributes │TS Del │Key Len│Value ││
+     * │  │ (Varint) │ (Varint)   │(Varint)│(Varint)│Len  ││
+     * │  └──────────┴────────────┴───────┴───────┴──────┘│
+     * ├──────────────────────────────────────────────────┤
+     * │  ...                                             │
+     * └──────────────────────────────────────────────────┘
+     * 示例：完整 Batch
+     * 假设：
+     * baseOffset = 100
+     * 包含 10 条消息
+     * 每条消息平均 50 字节
+     * GZIP 压缩
+     * ┌─────────────────────────────────────┐
+     * │  Header (67 bytes)                  │
+     * │  ├─ baseOffset: 100                 │
+     * │  ├─ length: 55 + 500 = 555          │
+     * │  ├─ magic: 2                        │
+     * │  ├─ crc: 0xABCD1234                 │
+     * │  ├─ attributes: 0x0001 (GZIP)       │
+     * │  ├─ lastOffsetDelta: 9              │
+     * │  ├─ baseTimestamp: 1234567890       │
+     * │  ├─ maxTimestamp: 1234567900        │
+     * │  ├─ producerId: -1 (非幂等)         │
+     * │  ├─ recordsCount: 10                │
+     * │  └─ ...                             │
+     * ├─────────────────────────────────────┤
+     * │  Records (约 500 bytes，压缩后可能更小) │
+     * │  ├─ Record[0]: offset=100           │
+     * │  ├─ Record[1]: offset=101           │
+     * │  ├─ ...                             │
+     * │  └─ Record[9]: offset=109           │
+     * └─────────────────────────────────────┘
+     * 总大小 ≈ 67 + 500 = 567 bytes
+     *
+     * 这个结构设计的关键优势：
+     *  ✅ 固定头部：快速定位各个字段
+     *  ✅ 批量元数据：在头部存储批次级别的信息（时间戳、offset 范围等）
+     *  ✅ 高效遍历：通过 recordsCount 知道有多少条消息
+     *  ✅ 完整性校验：CRC 保护整个批次的数据
+     */
 
     private static final byte COMPRESSION_CODEC_MASK = 0x07;
     private static final byte TRANSACTIONAL_FLAG_MASK = 0x10;
